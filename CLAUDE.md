@@ -102,6 +102,7 @@ stocks-analysis/
 - Reference tasks: `feat: fetch holdings from Kite (task-01)`
 - Commit: `uv.lock`, `pyproject.toml`, `.python-version`
 - Never commit: `.env`, credentials, `output/`, `__pycache__/`, `.venv/`
+- Always use `--no-gpg-sign` when committing (GPG signing is enforced globally but Claude does not have access to the GPG key)
 
 ## Instructions for Claude
 
@@ -110,3 +111,4 @@ stocks-analysis/
 - Run full suite + lint after changes
 - Mock external services in tests
 - Bug fixes start with a reproducing test
+- Commit frequently — after each passing test, completed feature, or meaningful change
