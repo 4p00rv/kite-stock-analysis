@@ -14,3 +14,7 @@ class KiteFetcher:
 
     def wait_for_login(self, timeout_ms: int = 300_000) -> None:
         self.page.wait_for_url(_POST_LOGIN_URL_PATTERN, timeout=timeout_ms)
+
+    def navigate_to_holdings(self) -> None:
+        self.page.goto(KITE_HOLDINGS_URL)
+        self.page.wait_for_load_state("networkidle")
