@@ -116,3 +116,67 @@ class TestParseHoldingRow:
         assert h.instrument == "ITC"
         assert h.quantity == 100
         assert h.avg_cost == 450.00
+
+
+def _make_mock_row(cells: list[str]) -> MagicMock:
+    """Create a mock row element with mock cell elements."""
+    row = MagicMock()
+    mock_cells = []
+    for text in cells:
+        cell = MagicMock()
+        cell.inner_text.return_value = text
+        mock_cells.append(cell)
+    row.query_selector_all.return_value = mock_cells
+    return row
+
+
+class TestFetchHoldings:
+    def test_single_holding(self) -> None:
+        page = MagicMock()
+        row = _make_mock_row([
+            "RELIANCE", "10", "2,450.50", "2,500.00",
+            "25,000.00", "+495.00", "+2.02%", "+15.00", "+0.60%",
+        ])
+        page.query_selector_all.return_value = [row]
+        fetcher = KiteFetcher(page)
+        holdings = fetcher.fetch_holdings()
+        assert len(holdings) == 1
+        assert holdings[0].instrument == "RELIANCE"
+        assert holdings[0].quantity == 10
+
+    def test_empty_holdings(self) -> None:
+        page = MagicMock()
+        page.query_selector_all.return_value = []
+        fetcher = KiteFetcher(page)
+        holdings = fetcher.fetch_holdings()
+        assert holdings == []
+
+    def test_multiple_holdings(self) -> None:
+        page = MagicMock()
+        row1 = _make_mock_row([
+            "RELIANCE", "10", "2,450.50", "2,500.00",
+            "25,000.00", "+495.00", "+2.02%", "+15.00", "+0.60%",
+        ])
+        row2 = _make_mock_row([
+            "TCS", "5", "3,200.00", "3,300.00",
+            "16,500.00", "+500.00", "+3.13%", "+50.00", "+1.54%",
+        ])
+        page.query_selector_all.return_value = [row1, row2]
+        fetcher = KiteFetcher(page)
+        holdings = fetcher.fetch_holdings()
+        assert len(holdings) == 2
+        assert holdings[0].instrument == "RELIANCE"
+        assert holdings[1].instrument == "TCS"
+
+    def test_skips_malformed_row(self) -> None:
+        page = MagicMock()
+        good_row = _make_mock_row([
+            "RELIANCE", "10", "2,450.50", "2,500.00",
+            "25,000.00", "+495.00", "+2.02%", "+15.00", "+0.60%",
+        ])
+        bad_row = _make_mock_row(["only", "two"])  # too few cells
+        page.query_selector_all.return_value = [good_row, bad_row]
+        fetcher = KiteFetcher(page)
+        holdings = fetcher.fetch_holdings()
+        assert len(holdings) == 1
+        assert holdings[0].instrument == "RELIANCE"
