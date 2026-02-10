@@ -1,11 +1,17 @@
+import argparse
 import csv
+import logging
+import os
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
 from stocks_analysis.kite import KiteFetcher
-from stocks_analysis.models import Holding
+from stocks_analysis.models import Holding, PortfolioSummary
+from stocks_analysis.sheets import create_sheets_client
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_OUTPUT_DIR = Path("output")
 
@@ -26,6 +32,14 @@ def save_holdings_to_csv(holdings: list[Holding], output_dir: Path | None = None
     return filepath
 
 
+def load_holdings_from_csv(filepath: Path) -> list[Holding]:
+    """Read a CSV file (with header) and return a list of Holdings."""
+    with open(filepath, newline="") as f:
+        reader = csv.reader(f)
+        next(reader)  # skip header
+        return [Holding.from_csv_row(row) for row in reader]
+
+
 @contextmanager
 def create_kite_fetcher() -> Generator[KiteFetcher]:
     from playwright.sync_api import sync_playwright
@@ -39,7 +53,33 @@ def create_kite_fetcher() -> Generator[KiteFetcher]:
             browser.close()
 
 
-def run() -> None:
+def _upload_to_sheets_if_configured(holdings: list[Holding]) -> None:
+    if not os.environ.get("GOOGLE_SHEETS_CREDENTIALS") or not os.environ.get("GOOGLE_SHEET_ID"):
+        return
+
+    try:
+        client = create_sheets_client()
+        summary = PortfolioSummary.from_holdings(holdings)
+        count = client.upload_holdings(holdings)
+        client.upload_summary(summary)
+        print(f"Uploaded {count} holdings and summary to Google Sheets.")
+    except Exception:
+        logger.warning("Failed to upload to Google Sheets", exc_info=True)
+
+
+def _upload_csv_to_sheets(filepath: Path) -> None:
+    """Load holdings from CSV and upload to Google Sheets."""
+    holdings = load_holdings_from_csv(filepath)
+    print(f"Loaded {len(holdings)} holdings from {filepath}")
+    client = create_sheets_client()
+    summary = PortfolioSummary.from_holdings(holdings)
+    count = client.upload_holdings(holdings)
+    client.upload_summary(summary)
+    print(f"Uploaded {count} holdings and summary to Google Sheets.")
+
+
+def _scrape() -> None:
+    """Kite login → scrape → CSV → optional sheets upload."""
     with create_kite_fetcher() as fetcher:
         print("Opening Kite login page...")
         fetcher.open_login_page()
@@ -56,3 +96,21 @@ def run() -> None:
         print(f"Found {len(holdings)} holdings.")
         filepath = save_holdings_to_csv(holdings)
         print(f"Saved to {filepath}")
+
+        _upload_to_sheets_if_configured(holdings)
+
+
+def run() -> None:
+    parser = argparse.ArgumentParser(description="Stocks analysis")
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("scrape", help="Scrape holdings from Kite")
+    upload_parser = sub.add_parser("upload", help="Upload existing CSV to Google Sheets")
+    upload_parser.add_argument("csv_path", type=Path, help="Path to holdings CSV file")
+
+    args = parser.parse_args()
+
+    if args.command == "upload":
+        _upload_csv_to_sheets(args.csv_path)
+    else:
+        _scrape()

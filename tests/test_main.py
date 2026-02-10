@@ -2,41 +2,26 @@ import csv
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from stocks_analysis.main import run, save_holdings_to_csv
+from stocks_analysis.main import _scrape, load_holdings_from_csv, run, save_holdings_to_csv
 from stocks_analysis.models import Holding
-
-
-def _sample_holding(**overrides: object) -> Holding:
-    defaults = {
-        "instrument": "RELIANCE",
-        "quantity": 10,
-        "avg_cost": 2450.50,
-        "ltp": 2500.00,
-        "current_value": 25000.00,
-        "pnl": 495.00,
-        "pnl_percent": 2.02,
-        "day_change": 15.00,
-        "day_change_percent": 0.60,
-    }
-    defaults.update(overrides)
-    return Holding(**defaults)
+from tests.conftest import make_holding
 
 
 class TestSaveHoldingsToCsv:
     def test_creates_csv_file(self, tmp_path: Path) -> None:
-        holdings = [_sample_holding()]
+        holdings = [make_holding()]
         path = save_holdings_to_csv(holdings, output_dir=tmp_path)
         assert path.exists()
         assert path.suffix == ".csv"
 
     def test_filename_has_timestamp(self, tmp_path: Path) -> None:
-        holdings = [_sample_holding()]
+        holdings = [make_holding()]
         path = save_holdings_to_csv(holdings, output_dir=tmp_path)
         assert path.name.startswith("holdings_")
         assert path.name.endswith(".csv")
 
     def test_csv_has_correct_headers(self, tmp_path: Path) -> None:
-        holdings = [_sample_holding()]
+        holdings = [make_holding()]
         path = save_holdings_to_csv(holdings, output_dir=tmp_path)
         with open(path) as f:
             reader = csv.reader(f)
@@ -44,7 +29,7 @@ class TestSaveHoldingsToCsv:
         assert headers == Holding.csv_headers()
 
     def test_csv_row_count(self, tmp_path: Path) -> None:
-        holdings = [_sample_holding(), _sample_holding(instrument="TCS")]
+        holdings = [make_holding(), make_holding(instrument="TCS")]
         path = save_holdings_to_csv(holdings, output_dir=tmp_path)
         with open(path) as f:
             reader = csv.reader(f)
@@ -52,7 +37,7 @@ class TestSaveHoldingsToCsv:
         assert len(rows) == 3  # 1 header + 2 data rows
 
     def test_csv_row_values(self, tmp_path: Path) -> None:
-        holdings = [_sample_holding()]
+        holdings = [make_holding()]
         path = save_holdings_to_csv(holdings, output_dir=tmp_path)
         with open(path) as f:
             reader = csv.reader(f)
@@ -64,7 +49,7 @@ class TestSaveHoldingsToCsv:
 
     def test_auto_creates_output_dir(self, tmp_path: Path) -> None:
         output_dir = tmp_path / "nested" / "output"
-        holdings = [_sample_holding()]
+        holdings = [make_holding()]
         path = save_holdings_to_csv(holdings, output_dir=output_dir)
         assert path.exists()
         assert output_dir.exists()
@@ -78,31 +63,41 @@ class TestSaveHoldingsToCsv:
         assert rows[0] == Holding.csv_headers()
 
 
-class TestRun:
+class TestLoadHoldingsFromCsv:
+    def test_reads_csv_and_returns_holdings(self, tmp_path: Path) -> None:
+        holdings = [make_holding(), make_holding(instrument="TCS")]
+        csv_path = save_holdings_to_csv(holdings, output_dir=tmp_path)
+        loaded = load_holdings_from_csv(csv_path)
+        assert len(loaded) == 2
+        assert loaded[0].instrument == "RELIANCE"
+        assert loaded[1].instrument == "TCS"
+
+    def test_round_trip_preserves_data(self, tmp_path: Path) -> None:
+        original = [make_holding()]
+        csv_path = save_holdings_to_csv(original, output_dir=tmp_path)
+        loaded = load_holdings_from_csv(csv_path)
+        assert loaded == original
+
+    def test_empty_csv_returns_empty_list(self, tmp_path: Path) -> None:
+        csv_path = save_holdings_to_csv([], output_dir=tmp_path)
+        loaded = load_holdings_from_csv(csv_path)
+        assert loaded == []
+
+
+class TestScrape:
+    @patch("stocks_analysis.main._upload_to_sheets_if_configured")
     @patch("stocks_analysis.main.create_kite_fetcher")
     @patch("stocks_analysis.main.save_holdings_to_csv")
     def test_calls_methods_in_order(
-        self, mock_save: MagicMock, mock_create: MagicMock, tmp_path: Path
+        self, mock_save: MagicMock, mock_create: MagicMock, mock_upload: MagicMock, tmp_path: Path
     ) -> None:
         mock_fetcher = MagicMock()
-        mock_fetcher.fetch_holdings.return_value = [
-            Holding(
-                instrument="RELIANCE",
-                quantity=10,
-                avg_cost=2450.50,
-                ltp=2500.00,
-                current_value=25000.00,
-                pnl=495.00,
-                pnl_percent=2.02,
-                day_change=15.00,
-                day_change_percent=0.60,
-            )
-        ]
+        mock_fetcher.fetch_holdings.return_value = [make_holding()]
         mock_create.return_value.__enter__ = MagicMock(return_value=mock_fetcher)
         mock_create.return_value.__exit__ = MagicMock(return_value=False)
         mock_save.return_value = tmp_path / "holdings_test.csv"
 
-        run()
+        _scrape()
 
         mock_fetcher.open_login_page.assert_called_once()
         mock_fetcher.wait_for_login.assert_called_once()
@@ -110,30 +105,131 @@ class TestRun:
         mock_fetcher.fetch_holdings.assert_called_once()
         mock_save.assert_called_once()
 
+    @patch("stocks_analysis.main._upload_to_sheets_if_configured")
     @patch("stocks_analysis.main.create_kite_fetcher")
     @patch("stocks_analysis.main.save_holdings_to_csv")
     def test_passes_holdings_to_save(
-        self, mock_save: MagicMock, mock_create: MagicMock, tmp_path: Path
+        self, mock_save: MagicMock, mock_create: MagicMock, mock_upload: MagicMock, tmp_path: Path
     ) -> None:
         mock_fetcher = MagicMock()
-        holdings = [
-            Holding(
-                instrument="TCS",
-                quantity=5,
-                avg_cost=3200.00,
-                ltp=3300.00,
-                current_value=16500.00,
-                pnl=500.00,
-                pnl_percent=3.13,
-                day_change=50.00,
-                day_change_percent=1.54,
-            )
-        ]
+        holdings = [make_holding(instrument="TCS")]
         mock_fetcher.fetch_holdings.return_value = holdings
         mock_create.return_value.__enter__ = MagicMock(return_value=mock_fetcher)
         mock_create.return_value.__exit__ = MagicMock(return_value=False)
         mock_save.return_value = tmp_path / "holdings_test.csv"
 
-        run()
+        _scrape()
 
         mock_save.assert_called_once_with(holdings)
+
+
+class TestUploadCsvToSheets:
+    @patch("stocks_analysis.main.create_sheets_client")
+    def test_loads_and_uploads(self, mock_create_client: MagicMock, tmp_path: Path) -> None:
+        from stocks_analysis.main import _upload_csv_to_sheets
+
+        mock_client = MagicMock()
+        mock_create_client.return_value = mock_client
+        mock_client.upload_holdings.return_value = 2
+
+        holdings = [make_holding(), make_holding(instrument="TCS")]
+        csv_path = save_holdings_to_csv(holdings, output_dir=tmp_path)
+
+        _upload_csv_to_sheets(csv_path)
+
+        mock_create_client.assert_called_once()
+        mock_client.upload_holdings.assert_called_once()
+        uploaded = mock_client.upload_holdings.call_args[0][0]
+        assert len(uploaded) == 2
+        assert uploaded[0].instrument == "RELIANCE"
+        assert uploaded[1].instrument == "TCS"
+        mock_client.upload_summary.assert_called_once()
+
+    @patch("stocks_analysis.main.create_sheets_client")
+    def test_raises_when_env_vars_missing(
+        self, mock_create_client: MagicMock, tmp_path: Path
+    ) -> None:
+        import pytest
+
+        from stocks_analysis.main import _upload_csv_to_sheets
+
+        mock_create_client.side_effect = ValueError("GOOGLE_SHEETS_CREDENTIALS not set")
+        csv_path = save_holdings_to_csv([make_holding()], output_dir=tmp_path)
+
+        with pytest.raises(ValueError, match="GOOGLE_SHEETS_CREDENTIALS"):
+            _upload_csv_to_sheets(csv_path)
+
+
+class TestRunWithSubcommands:
+    @patch("stocks_analysis.main._upload_csv_to_sheets")
+    def test_upload_subcommand_dispatches(self, mock_upload: MagicMock, tmp_path: Path) -> None:
+        csv_path = save_holdings_to_csv([make_holding()], output_dir=tmp_path)
+        with patch("sys.argv", ["prog", "upload", str(csv_path)]):
+            run()
+        mock_upload.assert_called_once()
+        assert mock_upload.call_args[0][0] == csv_path
+
+    @patch("stocks_analysis.main._scrape")
+    def test_scrape_subcommand_dispatches(self, mock_scrape: MagicMock) -> None:
+        with patch("sys.argv", ["prog", "scrape"]):
+            run()
+        mock_scrape.assert_called_once()
+
+    @patch("stocks_analysis.main._scrape")
+    def test_no_subcommand_defaults_to_scrape(self, mock_scrape: MagicMock) -> None:
+        with patch("sys.argv", ["prog"]):
+            run()
+        mock_scrape.assert_called_once()
+
+
+class TestUploadToSheetsIfConfigured:
+    @patch("stocks_analysis.main.create_sheets_client")
+    @patch.dict("os.environ", {"GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json", "GOOGLE_SHEET_ID": "x"})
+    def test_uploads_when_configured(self, mock_create_client: MagicMock) -> None:
+        from stocks_analysis.main import _upload_to_sheets_if_configured
+
+        mock_client = MagicMock()
+        mock_create_client.return_value = mock_client
+        mock_client.upload_holdings.return_value = 1
+
+        holdings = [make_holding()]
+        _upload_to_sheets_if_configured(holdings)
+
+        mock_create_client.assert_called_once()
+        mock_client.upload_holdings.assert_called_once_with(holdings)
+        mock_client.upload_summary.assert_called_once()
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_silently_skips_when_not_configured(self) -> None:
+        from stocks_analysis.main import _upload_to_sheets_if_configured
+
+        # Should not raise
+        _upload_to_sheets_if_configured([make_holding()])
+
+    @patch("stocks_analysis.main.create_sheets_client")
+    @patch.dict("os.environ", {"GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json", "GOOGLE_SHEET_ID": "x"})
+    def test_logs_warning_on_failure(self, mock_create_client: MagicMock) -> None:
+        from stocks_analysis.main import _upload_to_sheets_if_configured
+
+        mock_create_client.side_effect = Exception("connection failed")
+
+        with patch("stocks_analysis.main.logger") as mock_logger:
+            _upload_to_sheets_if_configured([make_holding()])
+            mock_logger.warning.assert_called_once()
+
+    @patch("stocks_analysis.main._upload_to_sheets_if_configured")
+    @patch("stocks_analysis.main.create_kite_fetcher")
+    @patch("stocks_analysis.main.save_holdings_to_csv")
+    def test_scrape_calls_upload(
+        self, mock_save: MagicMock, mock_create: MagicMock, mock_upload: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_fetcher = MagicMock()
+        holdings = [make_holding()]
+        mock_fetcher.fetch_holdings.return_value = holdings
+        mock_create.return_value.__enter__ = MagicMock(return_value=mock_fetcher)
+        mock_create.return_value.__exit__ = MagicMock(return_value=False)
+        mock_save.return_value = tmp_path / "holdings_test.csv"
+
+        _scrape()
+
+        mock_upload.assert_called_once_with(holdings)

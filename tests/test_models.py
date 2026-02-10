@@ -1,27 +1,14 @@
 from dataclasses import asdict
 
-from stocks_analysis.models import Holding
+import pytest
 
-
-def _sample_holding(**overrides: object) -> Holding:
-    defaults = {
-        "instrument": "RELIANCE",
-        "quantity": 10,
-        "avg_cost": 2450.50,
-        "ltp": 2500.00,
-        "current_value": 25000.00,
-        "pnl": 495.00,
-        "pnl_percent": 2.02,
-        "day_change": 15.00,
-        "day_change_percent": 0.60,
-    }
-    defaults.update(overrides)
-    return Holding(**defaults)
+from stocks_analysis.models import Holding, PortfolioSummary
+from tests.conftest import make_holding
 
 
 class TestHoldingCreation:
     def test_create_with_all_fields(self) -> None:
-        h = _sample_holding()
+        h = make_holding()
         assert h.instrument == "RELIANCE"
         assert h.quantity == 10
         assert h.avg_cost == 2450.50
@@ -34,15 +21,15 @@ class TestHoldingCreation:
         assert h.exchange == "NSE"
 
     def test_default_exchange_is_nse(self) -> None:
-        h = _sample_holding()
+        h = make_holding()
         assert h.exchange == "NSE"
 
     def test_custom_exchange(self) -> None:
-        h = _sample_holding(exchange="BSE")
+        h = make_holding(exchange="BSE")
         assert h.exchange == "BSE"
 
     def test_asdict(self) -> None:
-        h = _sample_holding()
+        h = make_holding()
         d = asdict(h)
         assert d["instrument"] == "RELIANCE"
         assert d["quantity"] == 10
@@ -67,7 +54,7 @@ class TestHoldingCsvMethods:
         ]
 
     def test_to_csv_row(self) -> None:
-        h = _sample_holding()
+        h = make_holding()
         row = h.to_csv_row()
         assert row == [
             "RELIANCE",
@@ -83,9 +70,107 @@ class TestHoldingCsvMethods:
         ]
 
     def test_to_csv_row_field_order_matches_headers(self) -> None:
-        h = _sample_holding()
+        h = make_holding()
         headers = Holding.csv_headers()
         row = h.to_csv_row()
         assert len(headers) == len(row)
         for header, value in zip(headers, row, strict=True):
             assert getattr(h, header) == value
+
+
+class TestHoldingFromCsvRow:
+    def test_round_trip(self) -> None:
+        """to_csv_row → from_csv_row should reproduce the original Holding."""
+        original = make_holding()
+        row = [str(v) for v in original.to_csv_row()]
+        restored = Holding.from_csv_row(row)
+        assert restored == original
+
+    def test_all_fields_parsed(self) -> None:
+        row = ["TCS", "5", "3200.0", "3350.5", "16752.5", "752.5", "4.7", "50.0", "1.52", "BSE"]
+        h = Holding.from_csv_row(row)
+        assert h.instrument == "TCS"
+        assert h.quantity == 5
+        assert h.avg_cost == 3200.0
+        assert h.ltp == 3350.5
+        assert h.current_value == 16752.5
+        assert h.pnl == 752.5
+        assert h.pnl_percent == 4.7
+        assert h.day_change == 50.0
+        assert h.day_change_percent == 1.52
+        assert h.exchange == "BSE"
+
+    def test_default_exchange_when_column_missing(self) -> None:
+        row = ["RELIANCE", "10", "2450.5", "2500.0", "25000.0", "495.0", "2.02", "15.0", "0.6"]
+        h = Holding.from_csv_row(row)
+        assert h.exchange == "NSE"
+
+
+class TestPortfolioSummaryFromHoldings:
+    def test_single_holding(self) -> None:
+        holdings = [make_holding()]
+        summary = PortfolioSummary.from_holdings(holdings)
+        # total_investment = current_value - pnl = 25000 - 495 = 24505
+        assert summary.total_investment == pytest.approx(24505.00)
+        assert summary.current_value == pytest.approx(25000.00)
+        assert summary.total_pnl == pytest.approx(495.00)
+        # total_pnl_percent = 495 / 24505 * 100
+        assert summary.total_pnl_percent == pytest.approx(495.0 / 24505.0 * 100)
+        # day_pnl = day_change * quantity = 15 * 10 = 150
+        assert summary.day_pnl == pytest.approx(150.00)
+        # day_pnl_percent = 150 / 25000 * 100
+        assert summary.day_pnl_percent == pytest.approx(150.0 / 25000.0 * 100)
+        assert summary.num_holdings == 1
+
+    def test_multiple_holdings(self) -> None:
+        holdings = [
+            make_holding(current_value=25000.00, pnl=495.00, day_change=15.00, quantity=10),
+            make_holding(
+                instrument="TCS",
+                current_value=16500.00,
+                pnl=500.00,
+                day_change=50.00,
+                quantity=5,
+            ),
+        ]
+        summary = PortfolioSummary.from_holdings(holdings)
+        # total_investment = (25000 - 495) + (16500 - 500) = 24505 + 16000 = 40505
+        assert summary.total_investment == pytest.approx(40505.00)
+        assert summary.current_value == pytest.approx(41500.00)
+        assert summary.total_pnl == pytest.approx(995.00)
+        assert summary.total_pnl_percent == pytest.approx(995.0 / 40505.0 * 100)
+        # day_pnl = 15*10 + 50*5 = 150 + 250 = 400
+        assert summary.day_pnl == pytest.approx(400.00)
+        assert summary.day_pnl_percent == pytest.approx(400.0 / 41500.0 * 100)
+        assert summary.num_holdings == 2
+
+    def test_empty_holdings(self) -> None:
+        summary = PortfolioSummary.from_holdings([])
+        assert summary.total_investment == 0.0
+        assert summary.current_value == 0.0
+        assert summary.total_pnl == 0.0
+        assert summary.total_pnl_percent == 0.0
+        assert summary.day_pnl == 0.0
+        assert summary.day_pnl_percent == 0.0
+        assert summary.num_holdings == 0
+
+
+class TestPortfolioSummaryCsvMethods:
+    def test_csv_headers(self) -> None:
+        headers = PortfolioSummary.csv_headers()
+        assert headers == [
+            "total_investment",
+            "current_value",
+            "total_pnl",
+            "total_pnl_percent",
+            "day_pnl",
+            "day_pnl_percent",
+            "num_holdings",
+        ]
+
+    def test_to_csv_row(self) -> None:
+        summary = PortfolioSummary.from_holdings([make_holding()])
+        row = summary.to_csv_row()
+        assert len(row) == 7
+        assert row[0] == pytest.approx(24505.00)
+        assert row[-1] == 1
