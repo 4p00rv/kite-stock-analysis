@@ -1,8 +1,31 @@
 import re
 
+from stocks_analysis.models import Holding
+
 KITE_LOGIN_URL = "https://kite.zerodha.com/"
 KITE_HOLDINGS_URL = "https://kite.zerodha.com/holdings"
-_POST_LOGIN_URL_PATTERN = re.compile(r"https://kite\.zerodha\.com/(dashboard|holdings|positions)")
+_POST_LOGIN_URL_PATTERN = re.compile(
+    r"https://kite\.zerodha\.com/(dashboard|holdings|positions)"
+)
+
+
+def _clean_number(text: str) -> float:
+    cleaned = text.replace(",", "").replace("%", "").replace("+", "").strip()
+    return float(cleaned)
+
+
+def parse_holding_row(row_data: dict[str, str]) -> Holding:
+    return Holding(
+        instrument=row_data["instrument"].strip(),
+        quantity=int(row_data["quantity"].replace(",", "")),
+        avg_cost=_clean_number(row_data["avg_cost"]),
+        ltp=_clean_number(row_data["ltp"]),
+        current_value=_clean_number(row_data["current_value"]),
+        pnl=_clean_number(row_data["pnl"]),
+        pnl_percent=_clean_number(row_data["pnl_percent"]),
+        day_change=_clean_number(row_data["day_change"]),
+        day_change_percent=_clean_number(row_data["day_change_percent"]),
+    )
 
 
 class KiteFetcher:
