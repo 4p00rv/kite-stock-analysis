@@ -87,5 +87,5 @@ class TestHoldingCsvMethods:
         headers = Holding.csv_headers()
         row = h.to_csv_row()
         assert len(headers) == len(row)
-        for header, value in zip(headers, row):
+        for header, value in zip(headers, row, strict=True):
             assert getattr(h, header) == value

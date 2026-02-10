@@ -7,9 +7,7 @@ logger = logging.getLogger(__name__)
 
 KITE_LOGIN_URL = "https://kite.zerodha.com/"
 KITE_HOLDINGS_URL = "https://kite.zerodha.com/holdings"
-_POST_LOGIN_URL_PATTERN = re.compile(
-    r"https://kite\.zerodha\.com/(dashboard|holdings|positions)"
-)
+_POST_LOGIN_URL_PATTERN = re.compile(r"https://kite\.zerodha\.com/(dashboard|holdings|positions)")
 
 # Placeholder selectors — calibrate against real Kite DOM on first run
 _HOLDINGS_ROW_SELECTOR = "table.holdings tbody tr"
@@ -67,9 +65,7 @@ class KiteFetcher:
                 cells = row.query_selector_all("td")
                 if len(cells) < len(_COLUMN_MAP):
                     continue
-                row_data = {
-                    key: cells[i].inner_text() for i, key in enumerate(_COLUMN_MAP)
-                }
+                row_data = {key: cells[i].inner_text() for i, key in enumerate(_COLUMN_MAP)}
                 holdings.append(parse_holding_row(row_data))
             except (ValueError, KeyError, IndexError):
                 logger.warning("Skipping malformed row", exc_info=True)

@@ -1,10 +1,10 @@
 from unittest.mock import MagicMock
 
 from stocks_analysis.kite import (
+    _POST_LOGIN_URL_PATTERN,
     KITE_HOLDINGS_URL,
     KITE_LOGIN_URL,
     KiteFetcher,
-    _POST_LOGIN_URL_PATTERN,
     parse_holding_row,
 )
 
@@ -29,17 +29,13 @@ class TestWaitForLogin:
         page = MagicMock()
         fetcher = KiteFetcher(page)
         fetcher.wait_for_login()
-        page.wait_for_url.assert_called_once_with(
-            _POST_LOGIN_URL_PATTERN, timeout=300_000
-        )
+        page.wait_for_url.assert_called_once_with(_POST_LOGIN_URL_PATTERN, timeout=300_000)
 
     def test_calls_wait_for_url_with_custom_timeout(self) -> None:
         page = MagicMock()
         fetcher = KiteFetcher(page)
         fetcher.wait_for_login(timeout_ms=60_000)
-        page.wait_for_url.assert_called_once_with(
-            _POST_LOGIN_URL_PATTERN, timeout=60_000
-        )
+        page.wait_for_url.assert_called_once_with(_POST_LOGIN_URL_PATTERN, timeout=60_000)
 
 
 class TestNavigateToHoldings:
@@ -133,10 +129,19 @@ def _make_mock_row(cells: list[str]) -> MagicMock:
 class TestFetchHoldings:
     def test_single_holding(self) -> None:
         page = MagicMock()
-        row = _make_mock_row([
-            "RELIANCE", "10", "2,450.50", "2,500.00",
-            "25,000.00", "+495.00", "+2.02%", "+15.00", "+0.60%",
-        ])
+        row = _make_mock_row(
+            [
+                "RELIANCE",
+                "10",
+                "2,450.50",
+                "2,500.00",
+                "25,000.00",
+                "+495.00",
+                "+2.02%",
+                "+15.00",
+                "+0.60%",
+            ]
+        )
         page.query_selector_all.return_value = [row]
         fetcher = KiteFetcher(page)
         holdings = fetcher.fetch_holdings()
@@ -153,14 +158,32 @@ class TestFetchHoldings:
 
     def test_multiple_holdings(self) -> None:
         page = MagicMock()
-        row1 = _make_mock_row([
-            "RELIANCE", "10", "2,450.50", "2,500.00",
-            "25,000.00", "+495.00", "+2.02%", "+15.00", "+0.60%",
-        ])
-        row2 = _make_mock_row([
-            "TCS", "5", "3,200.00", "3,300.00",
-            "16,500.00", "+500.00", "+3.13%", "+50.00", "+1.54%",
-        ])
+        row1 = _make_mock_row(
+            [
+                "RELIANCE",
+                "10",
+                "2,450.50",
+                "2,500.00",
+                "25,000.00",
+                "+495.00",
+                "+2.02%",
+                "+15.00",
+                "+0.60%",
+            ]
+        )
+        row2 = _make_mock_row(
+            [
+                "TCS",
+                "5",
+                "3,200.00",
+                "3,300.00",
+                "16,500.00",
+                "+500.00",
+                "+3.13%",
+                "+50.00",
+                "+1.54%",
+            ]
+        )
         page.query_selector_all.return_value = [row1, row2]
         fetcher = KiteFetcher(page)
         holdings = fetcher.fetch_holdings()
@@ -170,10 +193,19 @@ class TestFetchHoldings:
 
     def test_skips_malformed_row(self) -> None:
         page = MagicMock()
-        good_row = _make_mock_row([
-            "RELIANCE", "10", "2,450.50", "2,500.00",
-            "25,000.00", "+495.00", "+2.02%", "+15.00", "+0.60%",
-        ])
+        good_row = _make_mock_row(
+            [
+                "RELIANCE",
+                "10",
+                "2,450.50",
+                "2,500.00",
+                "25,000.00",
+                "+495.00",
+                "+2.02%",
+                "+15.00",
+                "+0.60%",
+            ]
+        )
         bad_row = _make_mock_row(["only", "two"])  # too few cells
         page.query_selector_all.return_value = [good_row, bad_row]
         fetcher = KiteFetcher(page)

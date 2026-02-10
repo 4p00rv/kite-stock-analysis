@@ -1,7 +1,8 @@
 import csv
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from stocks_analysis.main import save_holdings_to_csv
+from stocks_analysis.main import run, save_holdings_to_csv
 from stocks_analysis.models import Holding
 
 
@@ -75,3 +76,64 @@ class TestSaveHoldingsToCsv:
             rows = list(reader)
         assert len(rows) == 1
         assert rows[0] == Holding.csv_headers()
+
+
+class TestRun:
+    @patch("stocks_analysis.main.create_kite_fetcher")
+    @patch("stocks_analysis.main.save_holdings_to_csv")
+    def test_calls_methods_in_order(
+        self, mock_save: MagicMock, mock_create: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_holdings.return_value = [
+            Holding(
+                instrument="RELIANCE",
+                quantity=10,
+                avg_cost=2450.50,
+                ltp=2500.00,
+                current_value=25000.00,
+                pnl=495.00,
+                pnl_percent=2.02,
+                day_change=15.00,
+                day_change_percent=0.60,
+            )
+        ]
+        mock_create.return_value.__enter__ = MagicMock(return_value=mock_fetcher)
+        mock_create.return_value.__exit__ = MagicMock(return_value=False)
+        mock_save.return_value = tmp_path / "holdings_test.csv"
+
+        run()
+
+        mock_fetcher.open_login_page.assert_called_once()
+        mock_fetcher.wait_for_login.assert_called_once()
+        mock_fetcher.navigate_to_holdings.assert_called_once()
+        mock_fetcher.fetch_holdings.assert_called_once()
+        mock_save.assert_called_once()
+
+    @patch("stocks_analysis.main.create_kite_fetcher")
+    @patch("stocks_analysis.main.save_holdings_to_csv")
+    def test_passes_holdings_to_save(
+        self, mock_save: MagicMock, mock_create: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_fetcher = MagicMock()
+        holdings = [
+            Holding(
+                instrument="TCS",
+                quantity=5,
+                avg_cost=3200.00,
+                ltp=3300.00,
+                current_value=16500.00,
+                pnl=500.00,
+                pnl_percent=3.13,
+                day_change=50.00,
+                day_change_percent=1.54,
+            )
+        ]
+        mock_fetcher.fetch_holdings.return_value = holdings
+        mock_create.return_value.__enter__ = MagicMock(return_value=mock_fetcher)
+        mock_create.return_value.__exit__ = MagicMock(return_value=False)
+        mock_save.return_value = tmp_path / "holdings_test.csv"
+
+        run()
+
+        mock_save.assert_called_once_with(holdings)
