@@ -98,7 +98,7 @@ class SheetsClient:
     def _ensure_headers(self, worksheet: gspread.Worksheet, headers: list[str]) -> None:
         existing = worksheet.row_values(1)
         if existing != headers:
-            worksheet.update("A1", [headers])
+            worksheet.update([headers], range_name="A1")
 
     def _delete_rows_for_date(self, worksheet: gspread.Worksheet, date_str: str) -> None:
         col_values = worksheet.col_values(1)
@@ -204,15 +204,15 @@ class SheetsClient:
         sheet_id = ws.id
 
         # Header row and date column
-        ws.update("A1", "date", raw=False)
+        ws.update("date", range_name="A1", raw=False)
         ws.update(
-            "B1",
             '=TRANSPOSE(SORT(UNIQUE(FILTER(Holdings!B2:B, Holdings!B2:B<>""))))',
+            range_name="B1",
             raw=False,
         )
         ws.update(
-            "A2",
             '=SORT(UNIQUE(FILTER(Holdings!A2:A, Holdings!A2:A<>"")))',
+            range_name="A2",
             raw=False,
         )
         # B2: lookup formula
@@ -222,7 +222,7 @@ class SheetsClient:
             "Holdings!E:E, Holdings!A:A=$A2, Holdings!B:B=B$1"
             '), 1), ""))'
         )
-        ws.update("B2", b2_formula, raw=False)
+        ws.update(b2_formula, range_name="B2", raw=False)
 
         # Fill B2 right to CZ2, then fill B2:CZ2 down to row 1000
         self._spreadsheet.batch_update(
@@ -288,30 +288,30 @@ class SheetsClient:
         ws = self._get_or_create_plain_worksheet("Portfolio History")
         sheet_id = ws.id
 
-        ws.update("A1:H1", [headers])
+        ws.update([headers], range_name="A1:H1")
 
         ws.update(
-            "A2",
             '=SORT(UNIQUE(FILTER(Holdings!A$2:A, Holdings!A$2:A<>"")))',
+            range_name="A2",
             raw=False,
         )
         ws.update(
-            "B2",
             '=IF($A2="", "", SUMPRODUCT((Holdings!A$2:A=$A2)*Holdings!F$2:F))',
+            range_name="B2",
             raw=False,
         )
         ws.update(
-            "C2",
             '=IF($A2="", "", SUMPRODUCT((Holdings!A$2:A=$A2)*Holdings!D$2:D*Holdings!C$2:C))',
+            range_name="C2",
             raw=False,
         )
-        ws.update("D2", '=IF($A2="", "", B2-C2)', raw=False)
-        ws.update("E2", '=IF(OR($A2="", C2=0), "", D2/C2*100)', raw=False)
-        ws.update("F2", '=IF($A2="", "", COUNTIF(Holdings!A$2:A, $A2))', raw=False)
-        ws.update("G2", '=IF($A2="", "", MAX(B$2:B2))', raw=False)
+        ws.update('=IF($A2="", "", B2-C2)', range_name="D2", raw=False)
+        ws.update('=IF(OR($A2="", C2=0), "", D2/C2*100)', range_name="E2", raw=False)
+        ws.update('=IF($A2="", "", COUNTIF(Holdings!A$2:A, $A2))', range_name="F2", raw=False)
+        ws.update('=IF($A2="", "", MAX(B$2:B2))', range_name="G2", raw=False)
         ws.update(
-            "H2",
             '=IF(OR($A2="", G2=0), "", (1-B2/G2)*100)',
+            range_name="H2",
             raw=False,
         )
 
@@ -351,27 +351,27 @@ class SheetsClient:
         headers = ["instrument", "current_value", "weight_pct"]
         ws = self._get_or_create_plain_worksheet("Allocation")
 
-        ws.update("A1:C1", [headers])
+        ws.update([headers], range_name="A1:C1")
 
         # Helper cells for latest date / total value
-        ws.update("E1", "latest_date")
-        ws.update("E2", "=MAX(Holdings!A2:A)", raw=False)
-        ws.update("E3", "total_value")
+        ws.update("latest_date", range_name="E1")
+        ws.update("=MAX(Holdings!A2:A)", range_name="E2", raw=False)
+        ws.update("total_value", range_name="E3")
         ws.update(
-            "E4",
             "=SUMPRODUCT((Holdings!A2:A=$E$2)*Holdings!F2:F)",
+            range_name="E4",
             raw=False,
         )
 
         # Sorted allocation
         ws.update(
-            "A2",
             "=SORT(FILTER({Holdings!B2:B, Holdings!F2:F}, Holdings!A2:A=$E$2), 2, FALSE)",
+            range_name="A2",
             raw=False,
         )
         ws.update(
-            "C2",
             '=IF(A2="", "", B2/$E$4*100)',
+            range_name="C2",
             raw=False,
         )
 
@@ -398,7 +398,7 @@ class SheetsClient:
             ["HHI"],
             ["Top 5 Concentration %"],
         ]
-        ws.update("A1:A14", labels[:14])
+        ws.update(labels[:14], range_name="A1:A14")
 
         ph = "'Portfolio History'"
 
@@ -437,7 +437,7 @@ class SheetsClient:
                 ' IFERROR(SUM(FILTER(Allocation!C2:C, Allocation!C2:C<>"")), ""))'
             ],
         ]
-        ws.update("B1:B14", formulas[:14], raw=False)
+        ws.update(formulas[:14], range_name="B1:B14", raw=False)
 
         _format_header_row(ws, 2)
         ws.freeze(rows=1)

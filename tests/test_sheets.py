@@ -68,7 +68,7 @@ class TestEnsureHeaders:
         headers = ["date", "instrument"]
 
         client._ensure_headers(mock_ws, headers)
-        mock_ws.update.assert_called_once_with("A1", [headers])
+        mock_ws.update.assert_called_once_with([headers], range_name="A1")
 
     def test_no_op_when_headers_match(self, client: SheetsClient) -> None:
         mock_ws = MagicMock()
@@ -84,7 +84,7 @@ class TestEnsureHeaders:
         headers = ["date", "instrument"]
 
         client._ensure_headers(mock_ws, headers)
-        mock_ws.update.assert_called_once_with("A1", [headers])
+        mock_ws.update.assert_called_once_with([headers], range_name="A1")
 
 
 class TestDeleteRowsForDate:
@@ -544,19 +544,19 @@ class TestSetupPricesSheet:
         mock_ws.update.assert_called()
         calls = mock_ws.update.call_args_list
         # A1 = "date"
-        assert any(c[0][0] == "A1" and c[0][1] == "date" for c in calls)
+        assert any(c.kwargs.get("range_name") == "A1" and c[0][0] == "date" for c in calls)
         # B1 has TRANSPOSE formula
-        b1_calls = [c for c in calls if c[0][0] == "B1"]
+        b1_calls = [c for c in calls if c.kwargs.get("range_name") == "B1"]
         assert len(b1_calls) == 1
-        assert "TRANSPOSE" in str(b1_calls[0][0][1])
+        assert "TRANSPOSE" in str(b1_calls[0][0][0])
         # A2 has SORT/UNIQUE formula
-        a2_calls = [c for c in calls if c[0][0] == "A2"]
+        a2_calls = [c for c in calls if c.kwargs.get("range_name") == "A2"]
         assert len(a2_calls) == 1
-        assert "SORT" in str(a2_calls[0][0][1])
+        assert "SORT" in str(a2_calls[0][0][0])
         # B2 has INDEX/FILTER formula
-        b2_calls = [c for c in calls if c[0][0] == "B2"]
+        b2_calls = [c for c in calls if c.kwargs.get("range_name") == "B2"]
         assert len(b2_calls) == 1
-        assert "IFERROR" in str(b2_calls[0][0][1])
+        assert "IFERROR" in str(b2_calls[0][0][0])
 
         # Should use batchUpdate for copyPaste fill
         mock_spreadsheet.batch_update.assert_called_once()
@@ -580,13 +580,13 @@ class TestSetupPortfolioHistorySheet:
 
         calls = mock_ws.update.call_args_list
         # A2 has SORT/UNIQUE dates formula
-        a2_calls = [c for c in calls if c[0][0] == "A2"]
+        a2_calls = [c for c in calls if c.kwargs.get("range_name") == "A2"]
         assert len(a2_calls) == 1
-        assert "SORT" in str(a2_calls[0][0][1])
+        assert "SORT" in str(a2_calls[0][0][0])
         # B2 has SUMPRODUCT for total_value
-        b2_calls = [c for c in calls if c[0][0] == "B2"]
+        b2_calls = [c for c in calls if c.kwargs.get("range_name") == "B2"]
         assert len(b2_calls) == 1
-        assert "SUMPRODUCT" in str(b2_calls[0][0][1])
+        assert "SUMPRODUCT" in str(b2_calls[0][0][0])
 
         # Should use batchUpdate for copyPaste fill down
         mock_spreadsheet.batch_update.assert_called_once()
@@ -606,12 +606,12 @@ class TestSetupAllocationSheet:
 
         calls = mock_ws.update.call_args_list
         # E1 = "latest_date", E2 has MAX formula
-        e1_calls = [c for c in calls if c[0][0] == "E1"]
+        e1_calls = [c for c in calls if c.kwargs.get("range_name") == "E1"]
         assert len(e1_calls) == 1
         # A2 has SORT/FILTER formula
-        a2_calls = [c for c in calls if c[0][0] == "A2"]
+        a2_calls = [c for c in calls if c.kwargs.get("range_name") == "A2"]
         assert len(a2_calls) == 1
-        assert "SORT" in str(a2_calls[0][0][1])
+        assert "SORT" in str(a2_calls[0][0][0])
 
 
 class TestSetupDashboardSheet:
@@ -629,18 +629,18 @@ class TestSetupDashboardSheet:
         calls = mock_ws.update.call_args_list
         # Should write labels and formulas
         # Check A1:A14 contains labels
-        a_col_calls = [c for c in calls if c[0][0] == "A1:A14"]
+        a_col_calls = [c for c in calls if c.kwargs.get("range_name") == "A1:A14"]
         assert len(a_col_calls) == 1
-        labels = a_col_calls[0][0][1]
+        labels = a_col_calls[0][0][0]
         assert labels[0] == ["Metric"]
         assert labels[1] == ["Portfolio Value"]
         assert labels[8] == ["Days Invested"]
         assert labels[9] == ["XIRR"]
 
-        # Check B2 has a formula
-        b_col_calls = [c for c in calls if c[0][0] == "B1:B14"]
+        # Check B1:B14 has formulas
+        b_col_calls = [c for c in calls if c.kwargs.get("range_name") == "B1:B14"]
         assert len(b_col_calls) == 1
-        formulas = b_col_calls[0][0][1]
+        formulas = b_col_calls[0][0][0]
         assert formulas[0] == ["Value"]
         assert "IFERROR" in str(formulas[1][0])  # Portfolio Value formula
 
