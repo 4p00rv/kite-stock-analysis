@@ -544,7 +544,7 @@ class TestSetupPricesSheet:
         mock_ws.update.assert_called()
         calls = mock_ws.update.call_args_list
         # A1 = "date"
-        assert any(c.kwargs.get("range_name") == "A1" and c[0][0] == "date" for c in calls)
+        assert any(c.kwargs.get("range_name") == "A1" and c[0][0] == [["date"]] for c in calls)
         # B1 has TRANSPOSE formula
         b1_calls = [c for c in calls if c.kwargs.get("range_name") == "B1"]
         assert len(b1_calls) == 1
