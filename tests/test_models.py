@@ -116,10 +116,6 @@ class TestPortfolioSummaryFromHoldings:
         assert summary.total_pnl == pytest.approx(495.00)
         # total_pnl_percent = 495 / 24505 * 100
         assert summary.total_pnl_percent == pytest.approx(495.0 / 24505.0 * 100)
-        # day_pnl = day_change * quantity = 15 * 10 = 150
-        assert summary.day_pnl == pytest.approx(150.00)
-        # day_pnl_percent = 150 / 25000 * 100
-        assert summary.day_pnl_percent == pytest.approx(150.0 / 25000.0 * 100)
         assert summary.num_holdings == 1
 
     def test_multiple_holdings(self) -> None:
@@ -139,9 +135,6 @@ class TestPortfolioSummaryFromHoldings:
         assert summary.current_value == pytest.approx(41500.00)
         assert summary.total_pnl == pytest.approx(995.00)
         assert summary.total_pnl_percent == pytest.approx(995.0 / 40505.0 * 100)
-        # day_pnl = 15*10 + 50*5 = 150 + 250 = 400
-        assert summary.day_pnl == pytest.approx(400.00)
-        assert summary.day_pnl_percent == pytest.approx(400.0 / 41500.0 * 100)
         assert summary.num_holdings == 2
 
     def test_empty_holdings(self) -> None:
@@ -150,8 +143,6 @@ class TestPortfolioSummaryFromHoldings:
         assert summary.current_value == 0.0
         assert summary.total_pnl == 0.0
         assert summary.total_pnl_percent == 0.0
-        assert summary.day_pnl == 0.0
-        assert summary.day_pnl_percent == 0.0
         assert summary.num_holdings == 0
 
 
@@ -163,14 +154,12 @@ class TestPortfolioSummaryCsvMethods:
             "current_value",
             "total_pnl",
             "total_pnl_percent",
-            "day_pnl",
-            "day_pnl_percent",
             "num_holdings",
         ]
 
     def test_to_csv_row(self) -> None:
         summary = PortfolioSummary.from_holdings([make_holding()])
         row = summary.to_csv_row()
-        assert len(row) == 7
+        assert len(row) == 5
         assert row[0] == pytest.approx(24505.00)
         assert row[-1] == 1

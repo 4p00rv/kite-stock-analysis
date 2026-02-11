@@ -46,8 +46,6 @@ class PortfolioSummary:
     current_value: float
     total_pnl: float
     total_pnl_percent: float
-    day_pnl: float
-    day_pnl_percent: float
     num_holdings: int
 
     @classmethod
@@ -59,23 +57,18 @@ class PortfolioSummary:
                 current_value=0.0,
                 total_pnl=0.0,
                 total_pnl_percent=0.0,
-                day_pnl=0.0,
-                day_pnl_percent=0.0,
                 num_holdings=0,
             )
 
         current_value = sum(h.current_value for h in holdings)
         total_pnl = sum(h.pnl for h in holdings)
         total_investment = current_value - total_pnl
-        day_pnl = sum(h.day_change * h.quantity for h in holdings)
 
         return cls(
             total_investment=total_investment,
             current_value=current_value,
             total_pnl=total_pnl,
             total_pnl_percent=(total_pnl / total_investment * 100) if total_investment else 0.0,
-            day_pnl=day_pnl,
-            day_pnl_percent=(day_pnl / current_value * 100) if current_value else 0.0,
             num_holdings=len(holdings),
         )
 
