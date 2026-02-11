@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from datetime import date
 
 
 @dataclass
@@ -38,6 +39,81 @@ class Holding:
             day_change_percent=float(row[8]),
             exchange=row[9] if len(row) > 9 else "NSE",
         )
+
+
+@dataclass
+class SnapshotHolding:
+    date: date
+    instrument: str
+    quantity: int
+    avg_cost: float
+    ltp: float
+    current_value: float
+    pnl: float
+    pnl_percent: float
+    day_change: float
+    day_change_percent: float
+    exchange: str = "NSE"
+
+    @classmethod
+    def from_sheet_row(cls, row: list[str]) -> SnapshotHolding:
+        """Parse a Google Sheets row (date, instrument, qty, ...) into a SnapshotHolding."""
+        return cls(
+            date=date.fromisoformat(row[0]),
+            instrument=row[1],
+            quantity=int(row[2]),
+            avg_cost=float(row[3]),
+            ltp=float(row[4]),
+            current_value=float(row[5]),
+            pnl=float(row[6]),
+            pnl_percent=float(row[7]),
+            day_change=float(row[8]),
+            day_change_percent=float(row[9]),
+            exchange=row[10] if len(row) > 10 else "NSE",
+        )
+
+
+@dataclass
+class Snapshot:
+    date: date
+    holdings: list[SnapshotHolding]
+
+
+@dataclass
+class Transaction:
+    date: date
+    instrument: str
+    type: str  # "BUY" or "SELL"
+    quantity: int
+    price: float
+    amount: float  # negative=cash out (buy), positive=cash in (sell)
+
+
+@dataclass
+class DailyPortfolioValue:
+    date: date
+    total_value: float
+    total_cost: float
+    daily_return: float
+
+
+@dataclass
+class AnalysisResult:
+    start_date: date
+    end_date: date
+    xirr: float
+    twr_annualized: float
+    benchmark_twr: float
+    alpha: float
+    beta: float
+    sharpe: float
+    sortino: float
+    max_drawdown: float
+    max_drawdown_date: date | None
+    var_95_pct: float
+    herfindahl: float
+    top_5_concentration: float
+    warnings: list[str]
 
 
 @dataclass

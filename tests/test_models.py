@@ -1,8 +1,16 @@
 from dataclasses import asdict
+from datetime import date
 
 import pytest
 
-from stocks_analysis.models import Holding, PortfolioSummary
+from stocks_analysis.models import (
+    DailyPortfolioValue,
+    Holding,
+    PortfolioSummary,
+    Snapshot,
+    SnapshotHolding,
+    Transaction,
+)
 from tests.conftest import make_holding
 
 
@@ -163,3 +171,121 @@ class TestPortfolioSummaryCsvMethods:
         assert len(row) == 5
         assert row[0] == pytest.approx(24505.00)
         assert row[-1] == 1
+
+
+class TestSnapshotHolding:
+    def test_create(self) -> None:
+        sh = SnapshotHolding(
+            date=date(2025, 1, 15),
+            instrument="RELIANCE",
+            quantity=10,
+            avg_cost=2450.50,
+            ltp=2500.00,
+            current_value=25000.00,
+            pnl=495.00,
+            pnl_percent=2.02,
+            day_change=15.00,
+            day_change_percent=0.60,
+            exchange="NSE",
+        )
+        assert sh.date == date(2025, 1, 15)
+        assert sh.instrument == "RELIANCE"
+        assert sh.quantity == 10
+        assert sh.exchange == "NSE"
+
+    def test_from_sheet_row(self) -> None:
+        row = [
+            "2025-01-15",
+            "RELIANCE",
+            "10",
+            "2450.5",
+            "2500.0",
+            "25000.0",
+            "495.0",
+            "2.02",
+            "15.0",
+            "0.6",
+            "NSE",
+        ]
+        sh = SnapshotHolding.from_sheet_row(row)
+        assert sh.date == date(2025, 1, 15)
+        assert sh.instrument == "RELIANCE"
+        assert sh.quantity == 10
+        assert sh.avg_cost == 2450.5
+        assert sh.exchange == "NSE"
+
+    def test_from_sheet_row_default_exchange(self) -> None:
+        row = [
+            "2025-01-15",
+            "RELIANCE",
+            "10",
+            "2450.5",
+            "2500.0",
+            "25000.0",
+            "495.0",
+            "2.02",
+            "15.0",
+            "0.6",
+        ]
+        sh = SnapshotHolding.from_sheet_row(row)
+        assert sh.exchange == "NSE"
+
+
+class TestSnapshot:
+    def test_create(self) -> None:
+        sh = SnapshotHolding(
+            date=date(2025, 1, 15),
+            instrument="RELIANCE",
+            quantity=10,
+            avg_cost=2450.50,
+            ltp=2500.00,
+            current_value=25000.00,
+            pnl=495.00,
+            pnl_percent=2.02,
+            day_change=15.00,
+            day_change_percent=0.60,
+            exchange="NSE",
+        )
+        snap = Snapshot(date=date(2025, 1, 15), holdings=[sh])
+        assert snap.date == date(2025, 1, 15)
+        assert len(snap.holdings) == 1
+        assert snap.holdings[0].instrument == "RELIANCE"
+
+
+class TestTransaction:
+    def test_buy(self) -> None:
+        t = Transaction(
+            date=date(2025, 1, 15),
+            instrument="RELIANCE",
+            type="BUY",
+            quantity=10,
+            price=2450.50,
+            amount=-24505.00,
+        )
+        assert t.type == "BUY"
+        assert t.amount < 0  # cash out
+
+    def test_sell(self) -> None:
+        t = Transaction(
+            date=date(2025, 2, 1),
+            instrument="RELIANCE",
+            type="SELL",
+            quantity=5,
+            price=2600.00,
+            amount=13000.00,
+        )
+        assert t.type == "SELL"
+        assert t.amount > 0  # cash in
+
+
+class TestDailyPortfolioValue:
+    def test_create(self) -> None:
+        dpv = DailyPortfolioValue(
+            date=date(2025, 1, 15),
+            total_value=100000.0,
+            total_cost=95000.0,
+            daily_return=0.005,
+        )
+        assert dpv.date == date(2025, 1, 15)
+        assert dpv.total_value == 100000.0
+        assert dpv.daily_return == 0.005
