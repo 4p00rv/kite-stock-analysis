@@ -2,9 +2,10 @@ import argparse
 import csv
 import logging
 import os
+import re
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -69,14 +70,26 @@ def _upload_to_sheets_if_configured(holdings: list[Holding]) -> None:
         logger.warning("Failed to upload to Google Sheets", exc_info=True)
 
 
+def _extract_date_from_filename(filepath: Path) -> str:
+    """Extract the date from a holdings CSV filename (e.g. holdings_20240115_120000.csv).
+
+    Falls back to today's date if the filename doesn't match the expected pattern.
+    """
+    match = re.match(r"holdings_(\d{4})(\d{2})(\d{2})_\d{6}", filepath.stem)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+    return date.today().isoformat()
+
+
 def _upload_csv_to_sheets(filepath: Path) -> None:
     """Load holdings from CSV and upload to Google Sheets."""
     holdings = load_holdings_from_csv(filepath)
     print(f"Loaded {len(holdings)} holdings from {filepath}")
+    date_str = _extract_date_from_filename(filepath)
     client = create_sheets_client()
     summary = PortfolioSummary.from_holdings(holdings)
-    count = client.upload_holdings(holdings)
-    client.upload_summary(summary)
+    count = client.upload_holdings(holdings, date_str=date_str)
+    client.upload_summary(summary, date_str=date_str)
     print(f"Uploaded {count} holdings and summary to Google Sheets.")
 
 

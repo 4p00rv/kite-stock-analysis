@@ -1,8 +1,15 @@
 import csv
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from stocks_analysis.main import _scrape, load_holdings_from_csv, run, save_holdings_to_csv
+from stocks_analysis.main import (
+    _extract_date_from_filename,
+    _scrape,
+    load_holdings_from_csv,
+    run,
+    save_holdings_to_csv,
+)
 from stocks_analysis.models import Holding
 from tests.conftest import make_holding
 
@@ -123,6 +130,20 @@ class TestScrape:
         mock_save.assert_called_once_with(holdings)
 
 
+class TestExtractDateFromFilename:
+    def test_extracts_date_from_standard_filename(self) -> None:
+        path = Path("holdings_20240115_120000.csv")
+        assert _extract_date_from_filename(path) == "2024-01-15"
+
+    def test_falls_back_to_today_for_non_matching_filename(self) -> None:
+        path = Path("random.csv")
+        assert _extract_date_from_filename(path) == date.today().isoformat()
+
+    def test_nested_path_extracts_from_stem(self) -> None:
+        path = Path("/some/dir/holdings_20240115_120000.csv")
+        assert _extract_date_from_filename(path) == "2024-01-15"
+
+
 class TestUploadCsvToSheets:
     @patch("stocks_analysis.main.create_sheets_client")
     def test_loads_and_uploads(self, mock_create_client: MagicMock, tmp_path: Path) -> None:
@@ -134,6 +155,7 @@ class TestUploadCsvToSheets:
 
         holdings = [make_holding(), make_holding(instrument="TCS")]
         csv_path = save_holdings_to_csv(holdings, output_dir=tmp_path)
+        expected_date = _extract_date_from_filename(csv_path)
 
         _upload_csv_to_sheets(csv_path)
 
@@ -143,7 +165,9 @@ class TestUploadCsvToSheets:
         assert len(uploaded) == 2
         assert uploaded[0].instrument == "RELIANCE"
         assert uploaded[1].instrument == "TCS"
+        assert mock_client.upload_holdings.call_args[1]["date_str"] == expected_date
         mock_client.upload_summary.assert_called_once()
+        assert mock_client.upload_summary.call_args[1]["date_str"] == expected_date
 
     @patch("stocks_analysis.main.create_sheets_client")
     def test_raises_when_env_vars_missing(
