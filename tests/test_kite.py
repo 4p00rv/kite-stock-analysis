@@ -6,6 +6,7 @@ from stocks_analysis.kite import (
     KITE_LOGIN_URL,
     KiteFetcher,
     _extract_row_data,
+    _parse_quantity,
     _parse_tooltip_value,
     parse_holding_row,
 )
@@ -76,6 +77,37 @@ class TestParseTooltipValue:
         assert _parse_tooltip_value("1,234.56 (+10.00%)") == "1,234.56"
 
 
+class TestParseQuantity:
+    def test_simple_integer(self) -> None:
+        assert _parse_quantity("10") == 10
+
+    def test_with_commas(self) -> None:
+        assert _parse_quantity("1,234") == 1234
+
+    def test_t1_annotation_with_settled(self) -> None:
+        """T1: 13 awaiting delivery + 20 settled = 33 total."""
+        assert _parse_quantity("T1: 13 20") == 33
+
+    def test_t1_annotation_newline_separated(self) -> None:
+        assert _parse_quantity("T1: 13\n20") == 33
+
+    def test_t2_annotation(self) -> None:
+        assert _parse_quantity("T2: 5 100") == 105
+
+    def test_multiple_t_day_annotations(self) -> None:
+        assert _parse_quantity("T2: 5 T1: 3 100") == 108
+
+    def test_only_t1_annotation(self) -> None:
+        """When only T1 quantity exists (no settled shares yet)."""
+        assert _parse_quantity("T1: 13") == 13
+
+    def test_quantity_with_commas_and_t1(self) -> None:
+        assert _parse_quantity("T1: 1,300 20,500") == 21800
+
+    def test_whitespace_padding(self) -> None:
+        assert _parse_quantity("  20  ") == 20
+
+
 class TestParseHoldingRow:
     def test_standard_row_with_commas_and_signs(self) -> None:
         row_data = {
@@ -119,6 +151,22 @@ class TestParseHoldingRow:
         assert h.pnl_percent == -2.78
         assert h.day_change == -30.00
         assert h.day_change_percent == -1.69
+
+    def test_t1_settlement_quantity(self) -> None:
+        row_data = {
+            "instrument": "HDFCBANK",
+            "quantity": "T1: 13 20",
+            "avg_cost": "1,600.00",
+            "ltp": "1,650.00",
+            "current_value": "33,000.00",
+            "pnl": "+1,000.00",
+            "pnl_percent": "+3.13%",
+            "day_change": "+10.00",
+            "day_change_percent": "+0.61%",
+        }
+        h = parse_holding_row(row_data)
+        assert h.instrument == "HDFCBANK"
+        assert h.quantity == 33
 
     def test_no_commas_simple_values(self) -> None:
         row_data = {

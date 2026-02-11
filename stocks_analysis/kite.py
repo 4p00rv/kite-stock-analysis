@@ -23,6 +23,18 @@ _DATA_LABELS: dict[str, str] = {
 }
 
 
+def _parse_quantity(text: str) -> int:
+    """Parse quantity text that may contain T1/T2 settlement annotations.
+
+    Kite shows settlement info in the Qty cell, e.g. "T1: 3 3" where
+    3 shares are awaiting T1 delivery and 3 are settled. Total = 6.
+    """
+    # Strip T-day labels (T1:, T2:, etc.), then sum all remaining numbers
+    cleaned = re.sub(r"T\d+:", "", text)
+    numbers = re.findall(r"[\d,]+", cleaned)
+    return sum(int(n.replace(",", "")) for n in numbers)
+
+
 def _clean_number(text: str) -> float:
     cleaned = text.replace(",", "").replace("%", "").replace("+", "").strip()
     return float(cleaned)
@@ -60,7 +72,7 @@ def _extract_row_data(row: object) -> dict[str, str]:
 def parse_holding_row(row_data: dict[str, str]) -> Holding:
     return Holding(
         instrument=row_data["instrument"].strip(),
-        quantity=int(row_data["quantity"].replace(",", "")),
+        quantity=_parse_quantity(row_data["quantity"]),
         avg_cost=_clean_number(row_data["avg_cost"]),
         ltp=_clean_number(row_data["ltp"]),
         current_value=_clean_number(row_data["current_value"]),
