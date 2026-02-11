@@ -92,6 +92,8 @@ stocks-analysis/
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
+| `KITE_USER_ID` | Zerodha Kite user ID for auto-fill | No (manual login if unset) |
+| `KITE_PASSWORD` | Zerodha Kite password for auto-fill | No (manual login if unset) |
 | `GOOGLE_SHEETS_CREDENTIALS` | Path to service account JSON | Phase 2+ |
 | `GOOGLE_SHEET_ID` | Target sheet ID | Phase 2+ |
 

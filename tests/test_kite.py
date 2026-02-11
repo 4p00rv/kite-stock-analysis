@@ -286,6 +286,62 @@ class TestExtractRowData:
         assert data["day_change"] == "0"
 
 
+class TestFillLoginCredentials:
+    def test_fills_user_id_and_submits(self) -> None:
+        page = MagicMock()
+        fetcher = KiteFetcher(page)
+        fetcher.fill_login_credentials("AB1234", "secret123")
+
+        page.fill.assert_any_call('input[type="text"]#userid', "AB1234")
+        # Should click submit after filling user ID
+        page.click.assert_any_call('button[type="submit"]')
+
+    def test_waits_for_password_field_then_fills(self) -> None:
+        page = MagicMock()
+        fetcher = KiteFetcher(page)
+        fetcher.fill_login_credentials("AB1234", "secret123")
+
+        page.wait_for_selector.assert_any_call('input[type="password"]', timeout=10_000)
+        page.fill.assert_any_call('input[type="password"]', "secret123")
+
+    def test_submits_after_password(self) -> None:
+        page = MagicMock()
+        fetcher = KiteFetcher(page)
+        fetcher.fill_login_credentials("AB1234", "secret123")
+
+        # Should click submit twice: once for user ID, once for password
+        assert page.click.call_count == 2
+
+    def test_calls_in_correct_order(self) -> None:
+        page = MagicMock()
+        fetcher = KiteFetcher(page)
+        fetcher.fill_login_credentials("AB1234", "secret123")
+
+        expected_calls = [
+            ("fill", ('input[type="text"]#userid', "AB1234")),
+            ("click", ('button[type="submit"]',)),
+            ("wait_for_selector", ('input[type="password"]',)),
+            ("fill", ('input[type="password"]', "secret123")),
+            ("click", ('button[type="submit"]',)),
+        ]
+
+        call_log = []
+        for call in page.method_calls:
+            name = call[0]
+            args = call[1]
+            if name in ("fill", "click", "wait_for_selector"):
+                call_log.append((name, args))
+
+        # Verify order (wait_for_selector has extra kwarg, just check positional)
+        assert len(call_log) == 5
+        assert call_log[0] == expected_calls[0]
+        assert call_log[1] == expected_calls[1]
+        assert call_log[2][0] == "wait_for_selector"
+        assert call_log[2][1][0] == 'input[type="password"]'
+        assert call_log[3] == expected_calls[3]
+        assert call_log[4] == expected_calls[4]
+
+
 class TestFetchHoldings:
     def test_single_holding(self) -> None:
         page = MagicMock()

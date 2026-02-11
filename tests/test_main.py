@@ -182,6 +182,68 @@ class TestRunWithSubcommands:
         mock_scrape.assert_called_once()
 
 
+class TestScrapeAutoFill:
+    @patch("stocks_analysis.main._upload_to_sheets_if_configured")
+    @patch("stocks_analysis.main.create_kite_fetcher")
+    @patch("stocks_analysis.main.save_holdings_to_csv")
+    @patch.dict("os.environ", {"KITE_USER_ID": "AB1234", "KITE_PASSWORD": "secret123"}, clear=False)
+    def test_calls_fill_login_credentials_when_env_vars_set(
+        self, mock_save: MagicMock, mock_create: MagicMock, mock_upload: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_holdings.return_value = [make_holding()]
+        mock_create.return_value.__enter__ = MagicMock(return_value=mock_fetcher)
+        mock_create.return_value.__exit__ = MagicMock(return_value=False)
+        mock_save.return_value = tmp_path / "holdings_test.csv"
+
+        _scrape()
+
+        mock_fetcher.fill_login_credentials.assert_called_once_with("AB1234", "secret123")
+
+    @patch("stocks_analysis.main._upload_to_sheets_if_configured")
+    @patch("stocks_analysis.main.create_kite_fetcher")
+    @patch("stocks_analysis.main.save_holdings_to_csv")
+    @patch.dict("os.environ", {}, clear=True)
+    def test_skips_fill_when_env_vars_missing(
+        self, mock_save: MagicMock, mock_create: MagicMock, mock_upload: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_holdings.return_value = [make_holding()]
+        mock_create.return_value.__enter__ = MagicMock(return_value=mock_fetcher)
+        mock_create.return_value.__exit__ = MagicMock(return_value=False)
+        mock_save.return_value = tmp_path / "holdings_test.csv"
+
+        _scrape()
+
+        mock_fetcher.fill_login_credentials.assert_not_called()
+
+    @patch("stocks_analysis.main._upload_to_sheets_if_configured")
+    @patch("stocks_analysis.main.create_kite_fetcher")
+    @patch("stocks_analysis.main.save_holdings_to_csv")
+    @patch.dict("os.environ", {"KITE_USER_ID": "AB1234"}, clear=True)
+    def test_skips_fill_when_only_user_id_set(
+        self, mock_save: MagicMock, mock_create: MagicMock, mock_upload: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_fetcher = MagicMock()
+        mock_fetcher.fetch_holdings.return_value = [make_holding()]
+        mock_create.return_value.__enter__ = MagicMock(return_value=mock_fetcher)
+        mock_create.return_value.__exit__ = MagicMock(return_value=False)
+        mock_save.return_value = tmp_path / "holdings_test.csv"
+
+        _scrape()
+
+        mock_fetcher.fill_login_credentials.assert_not_called()
+
+
+class TestRunLoadsDotenv:
+    @patch("stocks_analysis.main._scrape")
+    @patch("stocks_analysis.main.load_dotenv")
+    def test_run_calls_load_dotenv(self, mock_dotenv: MagicMock, mock_scrape: MagicMock) -> None:
+        with patch("sys.argv", ["prog"]):
+            run()
+        mock_dotenv.assert_called_once()
+
+
 class TestUploadToSheetsIfConfigured:
     @patch("stocks_analysis.main.create_sheets_client")
     @patch.dict("os.environ", {"GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json", "GOOGLE_SHEET_ID": "x"})

@@ -90,6 +90,14 @@ class KiteFetcher:
     def open_login_page(self) -> None:
         self.page.goto(KITE_LOGIN_URL)
 
+    def fill_login_credentials(self, user_id: str, password: str) -> None:
+        """Auto-fill Kite login form (user ID + password). 2FA remains manual."""
+        self.page.fill('input[type="text"]#userid', user_id)
+        self.page.click('button[type="submit"]')
+        self.page.wait_for_selector('input[type="password"]', timeout=10_000)
+        self.page.fill('input[type="password"]', password)
+        self.page.click('button[type="submit"]')
+
     def wait_for_login(self, timeout_ms: int = 300_000) -> None:
         self.page.wait_for_url(_POST_LOGIN_URL_PATTERN, timeout=timeout_ms)
 

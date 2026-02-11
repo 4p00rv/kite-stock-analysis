@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from stocks_analysis.kite import KiteFetcher
 from stocks_analysis.models import Holding, PortfolioSummary
 from stocks_analysis.sheets import create_sheets_client
@@ -84,6 +86,12 @@ def _scrape() -> None:
         print("Opening Kite login page...")
         fetcher.open_login_page()
 
+        user_id = os.environ.get("KITE_USER_ID")
+        password = os.environ.get("KITE_PASSWORD")
+        if user_id and password:
+            print("Auto-filling Kite credentials...")
+            fetcher.fill_login_credentials(user_id, password)
+
         print("Waiting for login (complete 2FA in the browser)...")
         fetcher.wait_for_login()
 
@@ -93,14 +101,16 @@ def _scrape() -> None:
         print("Fetching holdings...")
         holdings = fetcher.fetch_holdings()
 
-        print(f"Found {len(holdings)} holdings.")
-        filepath = save_holdings_to_csv(holdings)
-        print(f"Saved to {filepath}")
+    print(f"Found {len(holdings)} holdings.")
+    filepath = save_holdings_to_csv(holdings)
+    print(f"Saved to {filepath}")
 
-        _upload_to_sheets_if_configured(holdings)
+    _upload_to_sheets_if_configured(holdings)
 
 
 def run() -> None:
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description="Stocks analysis")
     sub = parser.add_subparsers(dest="command")
 
