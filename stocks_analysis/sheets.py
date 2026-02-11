@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import os
-from collections import defaultdict
 from datetime import date
 
 import gspread
 from gspread.utils import rowcol_to_a1
 
-from stocks_analysis.models import AnalysisResult, DailyPortfolioValue, Holding, PortfolioSummary
+from stocks_analysis.models import Holding, PortfolioSummary, Transaction
 
 # Formatting colors (RGB dicts for gspread)
 HEADER_BG: dict[str, float] = {"red": 0.235, "green": 0.275, "blue": 0.349}  # #3C4659
@@ -142,205 +141,30 @@ class SheetsClient:
             return []
         return all_values[1:]
 
-    def upload_daily_values(
-        self,
-        series: list[DailyPortfolioValue],
-        benchmark_prices: dict[date, float],
-    ) -> None:
-        """Upload daily portfolio values with benchmark comparison and drawdown."""
-        headers = ["date", "portfolio_value", "benchmark_value_rebased", "drawdown_pct"]
-        ws = self._get_or_create_worksheet("Daily Values", headers)
+    def upload_transactions(self, transactions: list[Transaction]) -> None:
+        """Upload inferred transactions to the Transactions sheet."""
+        headers = ["date", "instrument", "type", "quantity", "price", "amount"]
+        ws = self._get_or_create_worksheet("Transactions", headers)
+        ws.batch_clear(["A2:F1000"])
 
-        # Rebase benchmark to 100
-        bench_dates = sorted(benchmark_prices.keys())
-        first_bench = benchmark_prices[bench_dates[0]] if bench_dates else 1.0
-
-        # Compute drawdown
-        running_max = 0.0
-        rows: list[list[object]] = []
-        for dpv in series:
-            if dpv.total_value > running_max:
-                running_max = dpv.total_value
-            dd_pct = (1.0 - dpv.total_value / running_max) * 100 if running_max > 0 else 0.0
-
-            bench_val = benchmark_prices.get(dpv.date)
-            bench_rebased = (bench_val / first_bench * 100) if bench_val and first_bench > 0 else ""
-
-            # Delete existing rows for this date
-            self._delete_rows_for_date(ws, dpv.date.isoformat())
-            rows.append(
-                [
-                    dpv.date.isoformat(),
-                    round(dpv.total_value, 2),
-                    round(bench_rebased, 2) if isinstance(bench_rebased, float) else "",
-                    round(dd_pct, 2),
-                ]
-            )
-
-        if rows:
-            ws.append_rows(rows)
-            _format_header_row(ws, len(headers))
-
-    def upload_rolling_returns(self, series: list[DailyPortfolioValue]) -> None:
-        """Upload rolling return windows (30d, 90d, 1yr)."""
-        headers = ["date", "30d_return", "90d_return", "1yr_return"]
-        ws = self._get_or_create_worksheet("Rolling Returns", headers)
-
-        rows: list[list[object]] = []
-        for i, dpv in enumerate(series):
-            r30 = self._rolling_return(series, i, 30)
-            r90 = self._rolling_return(series, i, 90)
-            r365 = self._rolling_return(series, i, 365)
-            rows.append(
-                [
-                    dpv.date.isoformat(),
-                    round(r30 * 100, 2) if r30 is not None else "",
-                    round(r90 * 100, 2) if r90 is not None else "",
-                    round(r365 * 100, 2) if r365 is not None else "",
-                ]
-            )
-
-        if rows:
-            ws.append_rows(rows)
-            _format_header_row(ws, len(headers))
-
-    @staticmethod
-    def _rolling_return(series: list[DailyPortfolioValue], idx: int, window: int) -> float | None:
-        """Compute rolling return for a given window size ending at idx."""
-        start_idx = idx - window
-        if start_idx < 0:
-            return None
-        start_val = series[start_idx].total_value
-        if start_val <= 0:
-            return None
-        return (series[idx].total_value - start_val) / start_val
-
-    def upload_monthly_returns(self, series: list[DailyPortfolioValue]) -> None:
-        """Upload monthly returns in pivot table format (year × month)."""
-        headers = [
-            "year",
-            "Jan",
-            "Feb",
-            "Mar",
-            "Apr",
-            "May",
-            "Jun",
-            "Jul",
-            "Aug",
-            "Sep",
-            "Oct",
-            "Nov",
-            "Dec",
-            "YTD",
-        ]
-        ws = self._get_or_create_worksheet("Monthly Returns", headers)
-
-        # Group values by (year, month) → take first and last value
-        monthly: dict[tuple[int, int], tuple[float, float]] = {}
-        for dpv in series:
-            key = (dpv.date.year, dpv.date.month)
-            if key not in monthly:
-                monthly[key] = (dpv.total_value, dpv.total_value)
-            else:
-                monthly[key] = (monthly[key][0], dpv.total_value)
-
-        # Group by year
-        years: dict[int, dict[int, float]] = defaultdict(dict)
-        for (yr, mo), (first_val, last_val) in monthly.items():
-            if first_val > 0:
-                years[yr][mo] = (last_val - first_val) / first_val * 100
-
-        # Year-start values for YTD
-        year_start: dict[int, float] = {}
-        for dpv in series:
-            if dpv.date.year not in year_start:
-                year_start[dpv.date.year] = dpv.total_value
-
-        year_end: dict[int, float] = {}
-        for dpv in series:
-            year_end[dpv.date.year] = dpv.total_value
-
-        rows: list[list[object]] = [[yr] for yr in sorted(years.keys())]
-        for row in rows:
-            yr = row[0]
-            for mo in range(1, 13):
-                row.append(round(years[yr].get(mo, 0.0), 2) if mo in years[yr] else "")
-            start = year_start.get(yr, 0)
-            end = year_end.get(yr, 0)
-            ytd = round((end - start) / start * 100, 2) if start > 0 else ""
-            row.append(ytd)
-
-        # Write all at once (overwrite data area)
-        if rows:
-            ws.update(f"A2:{_col_letter(len(headers))}{1 + len(rows)}", rows)
-            _format_header_row(ws, len(headers))
-
-    def upload_allocation(self, holdings: list[Holding]) -> None:
-        """Upload current allocation (top 10 + Others)."""
-        headers = ["instrument", "weight_pct", "current_value"]
-        ws = self._get_or_create_worksheet("Allocation", headers)
-
-        total = sum(h.current_value for h in holdings)
-        if total <= 0:
+        if not transactions:
             return
 
-        sorted_h = sorted(holdings, key=lambda h: h.current_value, reverse=True)
-        rows: list[list[object]] = []
-        others_value = 0.0
-        for i, h in enumerate(sorted_h):
-            if i < 10:
-                rows.append(
-                    [
-                        h.instrument,
-                        round(h.current_value / total * 100, 2),
-                        round(h.current_value, 2),
-                    ]
-                )
-            else:
-                others_value += h.current_value
-
-        if others_value > 0:
-            rows.append(["Others", round(others_value / total * 100, 2), round(others_value, 2)])
-
-        ws.update(f"A2:{_col_letter(len(headers))}{1 + len(rows)}", rows)
-        _format_header_row(ws, len(headers))
-
-    def upload_metrics(self, result: AnalysisResult) -> None:
-        """Upload a single metrics row."""
-        headers = [
-            "date",
-            "xirr",
-            "twr_annualized",
-            "benchmark_twr",
-            "alpha",
-            "beta",
-            "sharpe",
-            "sortino",
-            "max_drawdown",
-            "var_95_pct",
-            "herfindahl",
-            "top_5_concentration",
+        rows = [
+            [
+                t.date.isoformat(),
+                t.instrument,
+                t.type,
+                t.quantity,
+                t.price,
+                t.amount,
+            ]
+            for t in transactions
         ]
-        ws = self._get_or_create_worksheet("Metrics", headers)
-        row = [
-            result.end_date.isoformat(),
-            round(result.xirr * 100, 2),
-            round(result.twr_annualized * 100, 2),
-            round(result.benchmark_twr * 100, 2),
-            round(result.alpha * 100, 2),
-            round(result.beta, 2),
-            round(result.sharpe, 2),
-            round(result.sortino, 2),
-            round(result.max_drawdown * 100, 2),
-            round(result.var_95_pct, 2),
-            round(result.herfindahl, 4),
-            round(result.top_5_concentration * 100, 2),
-        ]
-        ws.update(f"A2:{_col_letter(len(headers))}2", [row])
-        _format_header_row(ws, len(headers))
+        ws.append_rows(rows)
 
     # ------------------------------------------------------------------
-    # Charts + Slicer
+    # Charts helpers
     # ------------------------------------------------------------------
 
     def _get_sheet_id(self, title: str) -> int | None:
@@ -361,30 +185,283 @@ class SheetsClient:
                     chart_map[title] = chart["chartId"]
         return chart_map
 
-    def create_or_update_charts(
-        self,
-        daily_values_rows: int,
-        rolling_returns_rows: int,
-        allocation_rows: int,
-    ) -> None:
-        """Create or update all analysis charts via Sheets API batchUpdate."""
-        dv_id = self._get_sheet_id("Daily Values")
-        rr_id = self._get_sheet_id("Rolling Returns")
+    # ------------------------------------------------------------------
+    # Formula-based setup (created once, auto-recalculate)
+    # ------------------------------------------------------------------
+
+    def _get_or_create_plain_worksheet(
+        self, title: str, rows: int = 1000, cols: int = 20
+    ) -> gspread.Worksheet:
+        """Get or create a worksheet without writing headers."""
+        try:
+            return self._spreadsheet.worksheet(title)
+        except gspread.WorksheetNotFound:
+            return self._spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
+
+    def setup_prices_sheet(self) -> None:
+        """Create Prices sheet with pivot formulas (date x instrument → LTP)."""
+        ws = self._get_or_create_plain_worksheet("Prices", rows=1000, cols=104)
+        sheet_id = ws.id
+
+        # Header row and date column
+        ws.update("A1", "date", raw=False)
+        ws.update(
+            "B1",
+            '=TRANSPOSE(SORT(UNIQUE(FILTER(Holdings!B2:B, Holdings!B2:B<>""))))',
+            raw=False,
+        )
+        ws.update(
+            "A2",
+            '=SORT(UNIQUE(FILTER(Holdings!A2:A, Holdings!A2:A<>"")))',
+            raw=False,
+        )
+        # B2: lookup formula
+        b2_formula = (
+            '=IF(OR($A2="", B$1=""), "",'
+            " IFERROR(INDEX(FILTER("
+            "Holdings!E:E, Holdings!A:A=$A2, Holdings!B:B=B$1"
+            '), 1), ""))'
+        )
+        ws.update("B2", b2_formula, raw=False)
+
+        # Fill B2 right to CZ2, then fill B2:CZ2 down to row 1000
+        self._spreadsheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "copyPaste": {
+                            "source": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": 1,
+                                "endRowIndex": 2,
+                                "startColumnIndex": 1,
+                                "endColumnIndex": 2,
+                            },
+                            "destination": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": 1,
+                                "endRowIndex": 2,
+                                "startColumnIndex": 1,
+                                "endColumnIndex": 104,
+                            },
+                            "pasteType": "PASTE_FORMULA",
+                        }
+                    },
+                    {
+                        "copyPaste": {
+                            "source": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": 1,
+                                "endRowIndex": 2,
+                                "startColumnIndex": 1,
+                                "endColumnIndex": 104,
+                            },
+                            "destination": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": 1,
+                                "endRowIndex": 1000,
+                                "startColumnIndex": 1,
+                                "endColumnIndex": 104,
+                            },
+                            "pasteType": "PASTE_FORMULA",
+                        }
+                    },
+                ]
+            }
+        )
+
+        ws.freeze(rows=1, cols=1)
+        print("Prices sheet configured.")
+
+    def setup_portfolio_history_sheet(self) -> None:
+        """Create Portfolio History sheet with per-snapshot aggregation formulas."""
+        headers = [
+            "date",
+            "total_value",
+            "total_cost",
+            "total_pnl",
+            "return_pct",
+            "num_holdings",
+            "running_max",
+            "drawdown_pct",
+        ]
+        ws = self._get_or_create_plain_worksheet("Portfolio History")
+        sheet_id = ws.id
+
+        ws.update("A1:H1", [headers])
+
+        ws.update(
+            "A2",
+            '=SORT(UNIQUE(FILTER(Holdings!A$2:A, Holdings!A$2:A<>"")))',
+            raw=False,
+        )
+        ws.update(
+            "B2",
+            '=IF($A2="", "", SUMPRODUCT((Holdings!A$2:A=$A2)*Holdings!F$2:F))',
+            raw=False,
+        )
+        ws.update(
+            "C2",
+            '=IF($A2="", "", SUMPRODUCT((Holdings!A$2:A=$A2)*Holdings!D$2:D*Holdings!C$2:C))',
+            raw=False,
+        )
+        ws.update("D2", '=IF($A2="", "", B2-C2)', raw=False)
+        ws.update("E2", '=IF(OR($A2="", C2=0), "", D2/C2*100)', raw=False)
+        ws.update("F2", '=IF($A2="", "", COUNTIF(Holdings!A$2:A, $A2))', raw=False)
+        ws.update("G2", '=IF($A2="", "", MAX(B$2:B2))', raw=False)
+        ws.update(
+            "H2",
+            '=IF(OR($A2="", G2=0), "", (1-B2/G2)*100)',
+            raw=False,
+        )
+
+        # Fill B2:H2 down to row 1000
+        self._spreadsheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "copyPaste": {
+                            "source": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": 1,
+                                "endRowIndex": 2,
+                                "startColumnIndex": 1,
+                                "endColumnIndex": 8,
+                            },
+                            "destination": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": 1,
+                                "endRowIndex": 1000,
+                                "startColumnIndex": 1,
+                                "endColumnIndex": 8,
+                            },
+                            "pasteType": "PASTE_FORMULA",
+                        }
+                    }
+                ]
+            }
+        )
+
+        _format_header_row(ws, len(headers))
+        ws.freeze(rows=1)
+        print("Portfolio History sheet configured.")
+
+    def setup_allocation_sheet(self) -> None:
+        """Create Allocation sheet with latest-snapshot weight formulas."""
+        headers = ["instrument", "current_value", "weight_pct"]
+        ws = self._get_or_create_plain_worksheet("Allocation")
+
+        ws.update("A1:C1", [headers])
+
+        # Helper cells for latest date / total value
+        ws.update("E1", "latest_date")
+        ws.update("E2", "=MAX(Holdings!A2:A)", raw=False)
+        ws.update("E3", "total_value")
+        ws.update(
+            "E4",
+            "=SUMPRODUCT((Holdings!A2:A=$E$2)*Holdings!F2:F)",
+            raw=False,
+        )
+
+        # Sorted allocation
+        ws.update(
+            "A2",
+            "=SORT(FILTER({Holdings!B2:B, Holdings!F2:F}, Holdings!A2:A=$E$2), 2, FALSE)",
+            raw=False,
+        )
+        ws.update(
+            "C2",
+            '=IF(A2="", "", B2/$E$4*100)',
+            raw=False,
+        )
+
+        _format_header_row(ws, len(headers))
+        print("Allocation sheet configured.")
+
+    def setup_dashboard_sheet(self) -> None:
+        """Create Dashboard sheet with key metrics formulas."""
+        ws = self._get_or_create_plain_worksheet("Dashboard")
+
+        labels = [
+            ["Metric"],
+            ["Portfolio Value"],
+            ["Total Cost"],
+            ["Total P&L"],
+            ["Total Return %"],
+            ["No. Holdings"],
+            ["First Date"],
+            ["Latest Date"],
+            ["Days Invested"],
+            ["XIRR"],
+            ["Max Drawdown %"],
+            ["Max Drawdown Date"],
+            ["HHI"],
+            ["Top 5 Concentration %"],
+        ]
+        ws.update("A1:A14", labels[:14])
+
+        ph = "'Portfolio History'"
+
+        def _latest(col: str) -> str:
+            return (
+                "=IFERROR(INDEX(SORT(FILTER("
+                "{" + f"{ph}!A2:A, {ph}!{col}2:{col}" + "}, "
+                f'{ph}!A2:A<>""), 1, FALSE), 1, 2), "")'
+            )
+
+        def _ph_filter(fn: str, c: str, fb: str) -> str:
+            return f'=IFERROR({fn}(FILTER({ph}!{c}2:{c}, {ph}!{c}2:{c}<>"")), {fb})'
+
+        formulas = [
+            ["Value"],
+            [_latest("B")],
+            [_latest("C")],
+            ['=IF(B2="", "", B2-B3)'],
+            ['=IF(OR(B3="", B3=0), "", B4/B3*100)'],
+            [_latest("F")],
+            [_ph_filter("MIN", "A", '""')],
+            [_ph_filter("MAX", "A", '""')],
+            ['=IF(OR(B7="", B8=""), "", B8-B7)'],
+            [
+                "=IFERROR(XIRR("
+                '{FILTER(Transactions!F2:F, Transactions!F2:F<>""); B2}, '
+                '{FILTER(Transactions!A2:A, Transactions!F2:F<>""); B8}'
+                '), "")'
+            ],
+            [_ph_filter("MAX", "H", "0")],
+            [f'=IFERROR(INDEX(FILTER({ph}!A2:A, {ph}!H2:H=B11), 1), "")'],
+            ['=IFERROR(SUMPRODUCT(FILTER(Allocation!C2:C, Allocation!C2:C<>"")^2/10000), "")'],
+            [
+                "=IFERROR(SUM(LARGE("
+                'FILTER(Allocation!C2:C, Allocation!C2:C<>""), {1,2,3,4,5})),'
+                ' IFERROR(SUM(FILTER(Allocation!C2:C, Allocation!C2:C<>"")), ""))'
+            ],
+        ]
+        ws.update("B1:B14", formulas[:14], raw=False)
+
+        _format_header_row(ws, 2)
+        ws.freeze(rows=1)
+        print("Dashboard sheet configured.")
+
+    def setup_charts(self) -> None:
+        """Create or update formula-based charts via Sheets API batchUpdate."""
+        ph_id = self._get_sheet_id("Portfolio History")
         al_id = self._get_sheet_id("Allocation")
-        if dv_id is None or rr_id is None or al_id is None:
+        dash_id = self._get_sheet_id("Dashboard")
+        if ph_id is None or al_id is None or dash_id is None:
             return
 
         existing = self._find_existing_charts()
         requests: list[dict] = []
 
         chart_specs = [
-            self._portfolio_vs_benchmark_spec(dv_id, daily_values_rows),
-            self._drawdown_spec(dv_id, daily_values_rows),
-            self._rolling_returns_spec(rr_id, rolling_returns_rows),
-            self._allocation_spec(al_id, allocation_rows),
+            self._portfolio_value_vs_cost_spec(ph_id),
+            self._drawdown_formula_spec(ph_id),
+            self._pnl_over_time_spec(ph_id),
+            self._allocation_formula_spec(al_id),
         ]
 
-        for title, spec, anchor_sheet_id, anchor_offset in chart_specs:
+        for title, spec, anchor_sheet_id, anchor_col in chart_specs:
             if title in existing:
                 requests.append(
                     {
@@ -405,7 +482,7 @@ class SheetsClient:
                                         "anchorCell": {
                                             "sheetId": anchor_sheet_id,
                                             "rowIndex": 0,
-                                            "columnIndex": anchor_offset,
+                                            "columnIndex": anchor_col,
                                         }
                                     }
                                 },
@@ -416,10 +493,11 @@ class SheetsClient:
 
         if requests:
             self._spreadsheet.batch_update({"requests": requests})
+        print("Charts configured.")
 
     @staticmethod
-    def _portfolio_vs_benchmark_spec(sheet_id: int, num_rows: int) -> tuple[str, dict, int, int]:
-        title = "Portfolio vs Benchmark"
+    def _portfolio_value_vs_cost_spec(sheet_id: int) -> tuple[str, dict, int, int]:
+        title = "Portfolio Value vs Cost"
         spec = {
             "title": title,
             "basicChart": {
@@ -433,7 +511,7 @@ class SheetsClient:
                                     {
                                         "sheetId": sheet_id,
                                         "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
+                                        "endRowIndex": 1000,
                                         "startColumnIndex": 0,
                                         "endColumnIndex": 1,
                                     }
@@ -450,7 +528,7 @@ class SheetsClient:
                                     {
                                         "sheetId": sheet_id,
                                         "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
+                                        "endRowIndex": 1000,
                                         "startColumnIndex": 1,
                                         "endColumnIndex": 2,
                                     }
@@ -466,7 +544,7 @@ class SheetsClient:
                                     {
                                         "sheetId": sheet_id,
                                         "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
+                                        "endRowIndex": 1000,
                                         "startColumnIndex": 2,
                                         "endColumnIndex": 3,
                                     }
@@ -479,10 +557,10 @@ class SheetsClient:
                 "headerCount": 1,
             },
         }
-        return title, spec, sheet_id, 5
+        return title, spec, sheet_id, 9
 
     @staticmethod
-    def _drawdown_spec(sheet_id: int, num_rows: int) -> tuple[str, dict, int, int]:
+    def _drawdown_formula_spec(sheet_id: int) -> tuple[str, dict, int, int]:
         title = "Drawdown"
         spec = {
             "title": title,
@@ -497,7 +575,7 @@ class SheetsClient:
                                     {
                                         "sheetId": sheet_id,
                                         "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
+                                        "endRowIndex": 1000,
                                         "startColumnIndex": 0,
                                         "endColumnIndex": 1,
                                     }
@@ -514,24 +592,25 @@ class SheetsClient:
                                     {
                                         "sheetId": sheet_id,
                                         "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
-                                        "startColumnIndex": 3,
-                                        "endColumnIndex": 4,
+                                        "endRowIndex": 1000,
+                                        "startColumnIndex": 7,
+                                        "endColumnIndex": 8,
                                     }
                                 ]
                             }
                         },
                         "targetAxis": "LEFT_AXIS",
+                        "colorStyle": {"rgbColor": {"red": 0.8, "green": 0.0, "blue": 0.0}},
                     }
                 ],
                 "headerCount": 1,
             },
         }
-        return title, spec, sheet_id, 5
+        return title, spec, sheet_id, 9
 
     @staticmethod
-    def _rolling_returns_spec(sheet_id: int, num_rows: int) -> tuple[str, dict, int, int]:
-        title = "Rolling Returns"
+    def _pnl_over_time_spec(sheet_id: int) -> tuple[str, dict, int, int]:
+        title = "P&L Over Time"
         spec = {
             "title": title,
             "basicChart": {
@@ -545,7 +624,7 @@ class SheetsClient:
                                     {
                                         "sheetId": sheet_id,
                                         "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
+                                        "endRowIndex": 1000,
                                         "startColumnIndex": 0,
                                         "endColumnIndex": 1,
                                     }
@@ -562,39 +641,7 @@ class SheetsClient:
                                     {
                                         "sheetId": sheet_id,
                                         "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
-                                        "startColumnIndex": 1,
-                                        "endColumnIndex": 2,
-                                    }
-                                ]
-                            }
-                        },
-                        "targetAxis": "LEFT_AXIS",
-                    },
-                    {
-                        "series": {
-                            "sourceRange": {
-                                "sources": [
-                                    {
-                                        "sheetId": sheet_id,
-                                        "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
-                                        "startColumnIndex": 2,
-                                        "endColumnIndex": 3,
-                                    }
-                                ]
-                            }
-                        },
-                        "targetAxis": "LEFT_AXIS",
-                    },
-                    {
-                        "series": {
-                            "sourceRange": {
-                                "sources": [
-                                    {
-                                        "sheetId": sheet_id,
-                                        "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
+                                        "endRowIndex": 1000,
                                         "startColumnIndex": 3,
                                         "endColumnIndex": 4,
                                     }
@@ -602,15 +649,15 @@ class SheetsClient:
                             }
                         },
                         "targetAxis": "LEFT_AXIS",
-                    },
+                    }
                 ],
                 "headerCount": 1,
             },
         }
-        return title, spec, sheet_id, 5
+        return title, spec, sheet_id, 9
 
     @staticmethod
-    def _allocation_spec(sheet_id: int, num_rows: int) -> tuple[str, dict, int, int]:
+    def _allocation_formula_spec(sheet_id: int) -> tuple[str, dict, int, int]:
         title = "Allocation"
         spec = {
             "title": title,
@@ -622,7 +669,7 @@ class SheetsClient:
                             {
                                 "sheetId": sheet_id,
                                 "startRowIndex": 0,
-                                "endRowIndex": num_rows + 1,
+                                "endRowIndex": 1000,
                                 "startColumnIndex": 0,
                                 "endColumnIndex": 1,
                             }
@@ -635,7 +682,7 @@ class SheetsClient:
                             {
                                 "sheetId": sheet_id,
                                 "startRowIndex": 0,
-                                "endRowIndex": num_rows + 1,
+                                "endRowIndex": 1000,
                                 "startColumnIndex": 2,
                                 "endColumnIndex": 3,
                             }
@@ -647,50 +694,14 @@ class SheetsClient:
         }
         return title, spec, sheet_id, 4
 
-    def create_date_slicer(self, num_rows: int) -> None:
-        """Create a date slicer on the Daily Values sheet."""
-        dv_id = self._get_sheet_id("Daily Values")
-        if dv_id is None:
-            return
-
-        # Check for existing slicers
-        metadata = self._spreadsheet.fetch_sheet_metadata()
-        for sheet in metadata.get("sheets", []):
-            if sheet["properties"]["sheetId"] == dv_id and sheet.get("slicers"):
-                return  # Already has a slicer
-
-        self._spreadsheet.batch_update(
-            {
-                "requests": [
-                    {
-                        "addSlicer": {
-                            "slicer": {
-                                "spec": {
-                                    "dataRange": {
-                                        "sheetId": dv_id,
-                                        "startRowIndex": 0,
-                                        "endRowIndex": num_rows + 1,
-                                        "startColumnIndex": 0,
-                                        "endColumnIndex": 1,
-                                    },
-                                    "columnIndex": 0,
-                                    "applyToPivotTables": False,
-                                },
-                                "position": {
-                                    "overlayPosition": {
-                                        "anchorCell": {
-                                            "sheetId": dv_id,
-                                            "rowIndex": 0,
-                                            "columnIndex": 5,
-                                        }
-                                    }
-                                },
-                            }
-                        }
-                    }
-                ]
-            }
-        )
+    def setup_all(self) -> None:
+        """Run all setup methods to create formula-based sheets and charts."""
+        self.setup_prices_sheet()
+        self.setup_portfolio_history_sheet()
+        self.setup_allocation_sheet()
+        self.setup_dashboard_sheet()
+        self.setup_charts()
+        print("All formula sheets and charts configured.")
 
 
 def create_sheets_client() -> SheetsClient:

@@ -90,33 +90,6 @@ class Transaction:
 
 
 @dataclass
-class DailyPortfolioValue:
-    date: date
-    total_value: float
-    total_cost: float
-    daily_return: float
-
-
-@dataclass
-class AnalysisResult:
-    start_date: date
-    end_date: date
-    xirr: float
-    twr_annualized: float
-    benchmark_twr: float
-    alpha: float
-    beta: float
-    sharpe: float
-    sortino: float
-    max_drawdown: float
-    max_drawdown_date: date | None
-    var_95_pct: float
-    herfindahl: float
-    top_5_concentration: float
-    warnings: list[str]
-
-
-@dataclass
 class PortfolioSummary:
     total_investment: float
     current_value: float

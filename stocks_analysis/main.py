@@ -10,9 +10,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from stocks_analysis.analysis import run_analysis
+from stocks_analysis.analysis import infer_transactions, parse_snapshots_from_rows
 from stocks_analysis.kite import KiteFetcher
-from stocks_analysis.models import AnalysisResult, Holding, PortfolioSummary
+from stocks_analysis.models import Holding, PortfolioSummary
 from stocks_analysis.sheets import create_sheets_client
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,13 @@ def _upload_csv_to_sheets(filepath: Path) -> None:
     client.upload_summary(summary, date_str=date_str)
     print(f"Uploaded {count} holdings and summary to Google Sheets.")
 
+    # Infer and upload transactions from all holdings snapshots
+    rows = client.read_all_holdings_rows()
+    snapshots = parse_snapshots_from_rows(rows)
+    transactions = infer_transactions(snapshots)
+    client.upload_transactions(transactions)
+    print(f"Uploaded {len(transactions)} inferred transactions.")
+
 
 def _scrape() -> None:
     """Kite login → scrape → CSV → optional sheets upload."""
@@ -122,81 +129,10 @@ def _scrape() -> None:
     _upload_to_sheets_if_configured(holdings)
 
 
-def _print_summary(result: AnalysisResult) -> None:
-    """Print compact analysis summary to terminal."""
-    print(
-        f"\nPORTFOLIO ANALYSIS ({result.start_date} \u2192 {result.end_date})\n"
-        f"  XIRR: {result.xirr * 100:.2f}%  |  TWR: {result.twr_annualized * 100:.1f}%"
-        f"  |  Nifty 50: {result.benchmark_twr * 100:.1f}%  |  Alpha: {result.alpha * 100:.1f}%\n"
-        f"  Sharpe: {result.sharpe:.2f}   |  Sortino: {result.sortino:.2f}"
-        f"  |  Beta: {result.beta:.2f}\n"
-        f"  Max Drawdown: {-result.max_drawdown * 100:.1f}%"
-        f"  |  VaR 95%: {result.var_95_pct:.1f}%\n"
-        f"  Top 5: {result.top_5_concentration * 100:.1f}%"
-        f"  |  HHI: {result.herfindahl:.4f}\n"
-    )
-    if result.warnings:
-        for w in result.warnings:
-            print(f"  \u26a0 {w}")
-
-
-def _analyze() -> None:
-    """Read holdings from Sheets, run analysis, upload results."""
+def _setup() -> None:
+    """Create formula-based sheets and charts in Google Sheets."""
     client = create_sheets_client()
-    rows = client.read_all_holdings_rows()
-
-    result, daily_series, transactions = run_analysis(rows)
-
-    if not daily_series:
-        print("No data to analyze.")
-        return
-
-    # Get last snapshot holdings for allocation
-    from stocks_analysis.analysis import parse_snapshots_from_rows
-
-    snapshots = parse_snapshots_from_rows(rows)
-    last_snap = snapshots[-1] if snapshots else None
-
-    # Fetch benchmark prices for chart data
-    from stocks_analysis.market_data import MarketDataClient
-
-    market = MarketDataClient()
-    benchmark_prices = market.get_benchmark_prices(result.start_date, result.end_date)
-
-    # Upload computed data
-    client.upload_daily_values(daily_series, benchmark_prices)
-    client.upload_rolling_returns(daily_series)
-    client.upload_monthly_returns(daily_series)
-    if last_snap:
-        # Convert SnapshotHoldings to Holdings for upload_allocation
-        holdings = [
-            Holding(
-                instrument=h.instrument,
-                quantity=h.quantity,
-                avg_cost=h.avg_cost,
-                ltp=h.ltp,
-                current_value=h.current_value,
-                pnl=h.pnl,
-                pnl_percent=h.pnl_percent,
-                day_change=h.day_change,
-                day_change_percent=h.day_change_percent,
-                exchange=h.exchange,
-            )
-            for h in last_snap.holdings
-        ]
-        client.upload_allocation(holdings)
-    client.upload_metrics(result)
-
-    # Charts + slicer
-    client.create_or_update_charts(
-        daily_values_rows=len(daily_series),
-        rolling_returns_rows=len(daily_series),
-        allocation_rows=len(last_snap.holdings) if last_snap else 0,
-    )
-    client.create_date_slicer(num_rows=len(daily_series))
-
-    _print_summary(result)
-    print("Charts updated in Google Sheets.")
+    client.setup_all()
 
 
 def run() -> None:
@@ -208,13 +144,13 @@ def run() -> None:
     sub.add_parser("scrape", help="Scrape holdings from Kite")
     upload_parser = sub.add_parser("upload", help="Upload existing CSV to Google Sheets")
     upload_parser.add_argument("csv_path", type=Path, help="Path to holdings CSV file")
-    sub.add_parser("analyze", help="Run portfolio analysis")
+    sub.add_parser("setup", help="Create formula-based sheets and charts")
 
     args = parser.parse_args()
 
     if args.command == "upload":
         _upload_csv_to_sheets(args.csv_path)
-    elif args.command == "analyze":
-        _analyze()
+    elif args.command == "setup":
+        _setup()
     else:
         _scrape()

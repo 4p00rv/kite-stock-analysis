@@ -4,15 +4,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from stocks_analysis.main import (
-    _analyze,
     _extract_date_from_filename,
-    _print_summary,
     _scrape,
     load_holdings_from_csv,
     run,
     save_holdings_to_csv,
 )
-from stocks_analysis.models import AnalysisResult, Holding
+from stocks_analysis.models import Holding
 from tests.conftest import make_holding
 
 
@@ -154,6 +152,7 @@ class TestUploadCsvToSheets:
         mock_client = MagicMock()
         mock_create_client.return_value = mock_client
         mock_client.upload_holdings.return_value = 2
+        mock_client.read_all_holdings_rows.return_value = []
 
         holdings = [make_holding(), make_holding(instrument="TCS")]
         csv_path = save_holdings_to_csv(holdings, output_dir=tmp_path)
@@ -184,6 +183,49 @@ class TestUploadCsvToSheets:
 
         with pytest.raises(ValueError, match="GOOGLE_SHEETS_CREDENTIALS"):
             _upload_csv_to_sheets(csv_path)
+
+    @patch("stocks_analysis.main.infer_transactions")
+    @patch("stocks_analysis.main.parse_snapshots_from_rows")
+    @patch("stocks_analysis.main.create_sheets_client")
+    def test_upload_also_writes_transactions(
+        self,
+        mock_create_client: MagicMock,
+        mock_parse: MagicMock,
+        mock_infer: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        from stocks_analysis.main import _upload_csv_to_sheets
+
+        mock_client = MagicMock()
+        mock_create_client.return_value = mock_client
+        mock_client.upload_holdings.return_value = 1
+        mock_client.read_all_holdings_rows.return_value = [
+            [
+                "2025-01-15",
+                "RELIANCE",
+                "10",
+                "2450.5",
+                "2500.0",
+                "25000.0",
+                "495.0",
+                "2.02",
+                "15.0",
+                "0.6",
+                "NSE",
+            ],
+        ]
+
+        mock_parse.return_value = [MagicMock()]
+        mock_txns = [MagicMock()]
+        mock_infer.return_value = mock_txns
+
+        csv_path = save_holdings_to_csv([make_holding()], output_dir=tmp_path)
+        _upload_csv_to_sheets(csv_path)
+
+        mock_client.read_all_holdings_rows.assert_called_once()
+        mock_parse.assert_called_once()
+        mock_infer.assert_called_once()
+        mock_client.upload_transactions.assert_called_once_with(mock_txns)
 
 
 class TestRunWithSubcommands:
@@ -323,111 +365,23 @@ class TestUploadToSheetsIfConfigured:
         mock_upload.assert_called_once_with(holdings)
 
 
-class TestAnalyzeSubcommand:
-    @patch("stocks_analysis.main._analyze")
-    def test_analyze_subcommand_dispatches(self, mock_analyze: MagicMock) -> None:
-        with patch("sys.argv", ["prog", "analyze"]):
+class TestSetupSubcommand:
+    @patch("stocks_analysis.main._setup")
+    def test_setup_subcommand_dispatches(self, mock_setup: MagicMock) -> None:
+        with patch("sys.argv", ["prog", "setup"]):
             run()
-        mock_analyze.assert_called_once()
+        mock_setup.assert_called_once()
 
 
-class TestAnalyze:
+class TestSetup:
     @patch("stocks_analysis.main.create_sheets_client")
-    @patch("stocks_analysis.main.run_analysis")
-    def test_analyze_runs_pipeline(
-        self, mock_run_analysis: MagicMock, mock_create_client: MagicMock
-    ) -> None:
+    def test_setup_calls_setup_all(self, mock_create_client: MagicMock) -> None:
+        from stocks_analysis.main import _setup
+
         mock_client = MagicMock()
         mock_create_client.return_value = mock_client
-        mock_client.read_all_holdings_rows.return_value = [
-            [
-                "2025-01-15",
-                "RELIANCE",
-                "10",
-                "2450.5",
-                "2500.0",
-                "25000.0",
-                "495.0",
-                "2.02",
-                "15.0",
-                "0.6",
-                "NSE",
-            ],
-        ]
 
-        result = AnalysisResult(
-            start_date=date(2025, 1, 15),
-            end_date=date(2025, 2, 11),
-            xirr=0.1842,
-            twr_annualized=0.168,
-            benchmark_twr=0.123,
-            alpha=0.032,
-            beta=0.89,
-            sharpe=1.24,
-            sortino=1.67,
-            max_drawdown=0.142,
-            max_drawdown_date=date(2025, 1, 25),
-            var_95_pct=-2.1,
-            herfindahl=0.0842,
-            top_5_concentration=0.623,
-            warnings=[],
-        )
-        mock_run_analysis.return_value = (result, [MagicMock()], [MagicMock()])
+        _setup()
 
-        _analyze()
-
-        mock_client.read_all_holdings_rows.assert_called_once()
-        mock_run_analysis.assert_called_once()
-        mock_client.upload_daily_values.assert_called_once()
-        mock_client.upload_rolling_returns.assert_called_once()
-        mock_client.upload_monthly_returns.assert_called_once()
-        mock_client.upload_allocation.assert_called_once()
-        mock_client.upload_metrics.assert_called_once()
-        mock_client.create_or_update_charts.assert_called_once()
-        mock_client.create_date_slicer.assert_called_once()
-
-    @patch("stocks_analysis.main.create_sheets_client")
-    @patch("stocks_analysis.main.run_analysis")
-    def test_analyze_handles_empty_data(
-        self, mock_run_analysis: MagicMock, mock_create_client: MagicMock
-    ) -> None:
-        mock_client = MagicMock()
-        mock_create_client.return_value = mock_client
-        mock_client.read_all_holdings_rows.return_value = []
-
-        from stocks_analysis.analysis import _EMPTY_RESULT
-
-        mock_run_analysis.return_value = (_EMPTY_RESULT, [], [])
-
-        _analyze()
-
-        mock_run_analysis.assert_called_once()
-        # No uploads when there's no data
-        mock_client.upload_daily_values.assert_not_called()
-
-
-class TestPrintSummary:
-    def test_prints_formatted_summary(self, capsys: object) -> None:
-        result = AnalysisResult(
-            start_date=date(2025, 1, 15),
-            end_date=date(2025, 2, 11),
-            xirr=0.1842,
-            twr_annualized=0.168,
-            benchmark_twr=0.123,
-            alpha=0.032,
-            beta=0.89,
-            sharpe=1.24,
-            sortino=1.67,
-            max_drawdown=0.142,
-            max_drawdown_date=date(2025, 1, 25),
-            var_95_pct=-2.1,
-            herfindahl=0.0842,
-            top_5_concentration=0.623,
-            warnings=[],
-        )
-        _print_summary(result)
-        captured = capsys.readouterr()  # type: ignore[union-attr]
-        assert "PORTFOLIO ANALYSIS" in captured.out
-        assert "18.42%" in captured.out  # XIRR
-        assert "1.24" in captured.out  # Sharpe
-        assert "Nifty 50" in captured.out
+        mock_create_client.assert_called_once()
+        mock_client.setup_all.assert_called_once()

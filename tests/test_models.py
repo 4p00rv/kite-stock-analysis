@@ -4,7 +4,6 @@ from datetime import date
 import pytest
 
 from stocks_analysis.models import (
-    DailyPortfolioValue,
     Holding,
     PortfolioSummary,
     Snapshot,
@@ -276,16 +275,3 @@ class TestTransaction:
         )
         assert t.type == "SELL"
         assert t.amount > 0  # cash in
-
-
-class TestDailyPortfolioValue:
-    def test_create(self) -> None:
-        dpv = DailyPortfolioValue(
-            date=date(2025, 1, 15),
-            total_value=100000.0,
-            total_cost=95000.0,
-            daily_return=0.005,
-        )
-        assert dpv.date == date(2025, 1, 15)
-        assert dpv.total_value == 100000.0
-        assert dpv.daily_return == 0.005

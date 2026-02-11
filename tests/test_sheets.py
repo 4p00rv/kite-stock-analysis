@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, call, patch
 import gspread
 import pytest
 
-from stocks_analysis.models import AnalysisResult, DailyPortfolioValue, PortfolioSummary
+from stocks_analysis.models import PortfolioSummary, Transaction
 from stocks_analysis.sheets import (
     DATE_COLOR_A,
     DATE_COLOR_B,
@@ -477,139 +477,176 @@ class TestReadAllHoldingsRows:
         assert rows == []
 
 
-class TestUploadDailyValues:
-    def test_uploads_daily_values(self, client: SheetsClient, mock_spreadsheet: MagicMock) -> None:
+class TestUploadTransactions:
+    def test_uploads_transactions_with_headers(
+        self, client: SheetsClient, mock_spreadsheet: MagicMock
+    ) -> None:
         mock_ws = MagicMock()
+        mock_ws.row_values.return_value = []
+        mock_spreadsheet.worksheet.side_effect = gspread.WorksheetNotFound("Transactions")
+        mock_spreadsheet.add_worksheet.return_value = mock_ws
         mock_ws.row_values.return_value = [
             "date",
-            "portfolio_value",
-            "benchmark_value_rebased",
-            "drawdown_pct",
+            "instrument",
+            "type",
+            "quantity",
+            "price",
+            "amount",
         ]
-        mock_ws.col_values.return_value = ["date"]
-        mock_spreadsheet.worksheet.return_value = mock_ws
 
-        series = [
-            DailyPortfolioValue(date(2025, 1, 15), 100000.0, 95000.0, 0.0),
-            DailyPortfolioValue(date(2025, 1, 16), 101000.0, 95000.0, 0.01),
+        txns = [
+            Transaction(date(2025, 1, 15), "RELIANCE", "BUY", 10, 2450.5, -24505.0),
+            Transaction(date(2025, 1, 20), "TCS", "BUY", 5, 3200.0, -16000.0),
         ]
-        benchmark = {date(2025, 1, 15): 22000.0, date(2025, 1, 16): 22100.0}
+        client.upload_transactions(txns)
 
-        client.upload_daily_values(series, benchmark)
+        # Should clear data and write new rows
+        mock_ws.batch_clear.assert_called_once_with(["A2:F1000"])
         mock_ws.append_rows.assert_called_once()
         rows = mock_ws.append_rows.call_args[0][0]
         assert len(rows) == 2
-        assert rows[0][0] == "2025-01-15"
+        assert rows[0] == ["2025-01-15", "RELIANCE", "BUY", 10, 2450.5, -24505.0]
+        assert rows[1] == ["2025-01-20", "TCS", "BUY", 5, 3200.0, -16000.0]
 
-
-class TestUploadRollingReturns:
-    def test_uploads_rolling_returns(
+    def test_empty_transactions_clears_only(
         self, client: SheetsClient, mock_spreadsheet: MagicMock
     ) -> None:
-        mock_ws = MagicMock()
-        mock_ws.row_values.return_value = ["date", "30d_return", "90d_return", "1yr_return"]
-        mock_ws.col_values.return_value = ["date"]
-        mock_spreadsheet.worksheet.return_value = mock_ws
-
-        series = [
-            DailyPortfolioValue(date(2025, 1, d), 100000.0 + d * 100, 95000.0, 0.001)
-            for d in range(1, 32)
-        ]
-        client.upload_rolling_returns(series)
-        mock_ws.append_rows.assert_called_once()
-
-
-class TestUploadMonthlyReturns:
-    def test_uploads_monthly_returns(
-        self, client: SheetsClient, mock_spreadsheet: MagicMock
-    ) -> None:
-        mock_ws = MagicMock()
-        mock_ws.row_values.return_value = [
-            "year",
-            "Jan",
-            "Feb",
-            "Mar",
-            "Apr",
-            "May",
-            "Jun",
-            "Jul",
-            "Aug",
-            "Sep",
-            "Oct",
-            "Nov",
-            "Dec",
-            "YTD",
-        ]
-        mock_spreadsheet.worksheet.return_value = mock_ws
-
-        series = [
-            DailyPortfolioValue(date(2025, 1, d), 100000.0 + d * 100, 95000.0, 0.001)
-            for d in range(1, 32)
-        ]
-        client.upload_monthly_returns(series)
-        mock_ws.update.assert_called()
-
-
-class TestUploadAllocation:
-    def test_uploads_allocation(self, client: SheetsClient, mock_spreadsheet: MagicMock) -> None:
-        mock_ws = MagicMock()
-        mock_ws.row_values.return_value = ["instrument", "weight_pct", "current_value"]
-        mock_spreadsheet.worksheet.return_value = mock_ws
-
-        holdings = [
-            make_holding(instrument="RELIANCE", current_value=50000.0),
-            make_holding(instrument="TCS", current_value=30000.0),
-            make_holding(instrument="INFY", current_value=20000.0),
-        ]
-        client.upload_allocation(holdings)
-        mock_ws.update.assert_called()
-
-
-class TestUploadMetrics:
-    def test_uploads_metrics(self, client: SheetsClient, mock_spreadsheet: MagicMock) -> None:
         mock_ws = MagicMock()
         mock_ws.row_values.return_value = [
             "date",
-            "xirr",
-            "twr_annualized",
-            "benchmark_twr",
-            "alpha",
-            "beta",
-            "sharpe",
-            "sortino",
-            "max_drawdown",
-            "var_95_pct",
-            "herfindahl",
-            "top_5_concentration",
+            "instrument",
+            "type",
+            "quantity",
+            "price",
+            "amount",
         ]
         mock_spreadsheet.worksheet.return_value = mock_ws
 
-        result = AnalysisResult(
-            start_date=date(2025, 1, 15),
-            end_date=date(2025, 2, 11),
-            xirr=0.1842,
-            twr_annualized=0.168,
-            benchmark_twr=0.123,
-            alpha=0.032,
-            beta=0.89,
-            sharpe=1.24,
-            sortino=1.67,
-            max_drawdown=0.142,
-            max_drawdown_date=date(2025, 1, 25),
-            var_95_pct=-2.1,
-            herfindahl=0.0842,
-            top_5_concentration=0.623,
-            warnings=[],
-        )
-        client.upload_metrics(result)
-        mock_ws.update.assert_called()
+        client.upload_transactions([])
+
+        mock_ws.batch_clear.assert_called_once_with(["A2:F1000"])
+        mock_ws.append_rows.assert_not_called()
 
 
-class TestCreateOrUpdateCharts:
-    def test_creates_charts_via_batch_update(
+class TestSetupPricesSheet:
+    def test_creates_prices_sheet_with_formulas(
         self, client: SheetsClient, mock_spreadsheet: MagicMock
     ) -> None:
-        # Set up worksheet mocks with sheet IDs
+        mock_ws = MagicMock()
+        mock_ws.row_values.return_value = []
+        mock_ws.id = 500
+        mock_spreadsheet.worksheet.side_effect = gspread.WorksheetNotFound("Prices")
+        mock_spreadsheet.add_worksheet.return_value = mock_ws
+
+        client.setup_prices_sheet()
+
+        # Should write header formula in A1
+        mock_ws.update.assert_called()
+        calls = mock_ws.update.call_args_list
+        # A1 = "date"
+        assert any(c[0][0] == "A1" and c[0][1] == "date" for c in calls)
+        # B1 has TRANSPOSE formula
+        b1_calls = [c for c in calls if c[0][0] == "B1"]
+        assert len(b1_calls) == 1
+        assert "TRANSPOSE" in str(b1_calls[0][0][1])
+        # A2 has SORT/UNIQUE formula
+        a2_calls = [c for c in calls if c[0][0] == "A2"]
+        assert len(a2_calls) == 1
+        assert "SORT" in str(a2_calls[0][0][1])
+        # B2 has INDEX/FILTER formula
+        b2_calls = [c for c in calls if c[0][0] == "B2"]
+        assert len(b2_calls) == 1
+        assert "IFERROR" in str(b2_calls[0][0][1])
+
+        # Should use batchUpdate for copyPaste fill
+        mock_spreadsheet.batch_update.assert_called_once()
+        body = mock_spreadsheet.batch_update.call_args[0][0]
+        requests = body["requests"]
+        copy_requests = [r for r in requests if "copyPaste" in r]
+        assert len(copy_requests) == 2  # fill right + fill down
+
+
+class TestSetupPortfolioHistorySheet:
+    def test_creates_portfolio_history_with_formulas(
+        self, client: SheetsClient, mock_spreadsheet: MagicMock
+    ) -> None:
+        mock_ws = MagicMock()
+        mock_ws.row_values.return_value = []
+        mock_ws.id = 600
+        mock_spreadsheet.worksheet.side_effect = gspread.WorksheetNotFound("Portfolio History")
+        mock_spreadsheet.add_worksheet.return_value = mock_ws
+
+        client.setup_portfolio_history_sheet()
+
+        calls = mock_ws.update.call_args_list
+        # A2 has SORT/UNIQUE dates formula
+        a2_calls = [c for c in calls if c[0][0] == "A2"]
+        assert len(a2_calls) == 1
+        assert "SORT" in str(a2_calls[0][0][1])
+        # B2 has SUMPRODUCT for total_value
+        b2_calls = [c for c in calls if c[0][0] == "B2"]
+        assert len(b2_calls) == 1
+        assert "SUMPRODUCT" in str(b2_calls[0][0][1])
+
+        # Should use batchUpdate for copyPaste fill down
+        mock_spreadsheet.batch_update.assert_called_once()
+
+
+class TestSetupAllocationSheet:
+    def test_creates_allocation_with_formulas(
+        self, client: SheetsClient, mock_spreadsheet: MagicMock
+    ) -> None:
+        mock_ws = MagicMock()
+        mock_ws.row_values.return_value = []
+        mock_ws.id = 700
+        mock_spreadsheet.worksheet.side_effect = gspread.WorksheetNotFound("Allocation")
+        mock_spreadsheet.add_worksheet.return_value = mock_ws
+
+        client.setup_allocation_sheet()
+
+        calls = mock_ws.update.call_args_list
+        # E1 = "latest_date", E2 has MAX formula
+        e1_calls = [c for c in calls if c[0][0] == "E1"]
+        assert len(e1_calls) == 1
+        # A2 has SORT/FILTER formula
+        a2_calls = [c for c in calls if c[0][0] == "A2"]
+        assert len(a2_calls) == 1
+        assert "SORT" in str(a2_calls[0][0][1])
+
+
+class TestSetupDashboardSheet:
+    def test_creates_dashboard_with_labels_and_formulas(
+        self, client: SheetsClient, mock_spreadsheet: MagicMock
+    ) -> None:
+        mock_ws = MagicMock()
+        mock_ws.row_values.return_value = []
+        mock_ws.id = 800
+        mock_spreadsheet.worksheet.side_effect = gspread.WorksheetNotFound("Dashboard")
+        mock_spreadsheet.add_worksheet.return_value = mock_ws
+
+        client.setup_dashboard_sheet()
+
+        calls = mock_ws.update.call_args_list
+        # Should write labels and formulas
+        # Check A1:A14 contains labels
+        a_col_calls = [c for c in calls if c[0][0] == "A1:A14"]
+        assert len(a_col_calls) == 1
+        labels = a_col_calls[0][0][1]
+        assert labels[0] == ["Metric"]
+        assert labels[1] == ["Portfolio Value"]
+        assert labels[8] == ["Days Invested"]
+        assert labels[9] == ["XIRR"]
+
+        # Check B2 has a formula
+        b_col_calls = [c for c in calls if c[0][0] == "B1:B14"]
+        assert len(b_col_calls) == 1
+        formulas = b_col_calls[0][0][1]
+        assert formulas[0] == ["Value"]
+        assert "IFERROR" in str(formulas[1][0])  # Portfolio Value formula
+
+
+class TestSetupCharts:
+    def test_creates_four_charts(self, client: SheetsClient, mock_spreadsheet: MagicMock) -> None:
         def make_ws(title: str, sheet_id: int) -> MagicMock:
             ws = MagicMock()
             ws.title = title
@@ -617,30 +654,25 @@ class TestCreateOrUpdateCharts:
             return ws
 
         mock_spreadsheet.worksheets.return_value = [
-            make_ws("Daily Values", 100),
-            make_ws("Rolling Returns", 200),
-            make_ws("Allocation", 300),
+            make_ws("Portfolio History", 600),
+            make_ws("Allocation", 700),
+            make_ws("Dashboard", 800),
         ]
-        # No existing charts
         mock_spreadsheet.fetch_sheet_metadata.return_value = {
             "sheets": [
-                {"properties": {"sheetId": 100}, "charts": []},
-                {"properties": {"sheetId": 200}, "charts": []},
-                {"properties": {"sheetId": 300}, "charts": []},
+                {"properties": {"sheetId": 600}, "charts": []},
+                {"properties": {"sheetId": 700}, "charts": []},
+                {"properties": {"sheetId": 800}, "charts": []},
             ]
         }
 
-        client.create_or_update_charts(
-            daily_values_rows=10,
-            rolling_returns_rows=10,
-            allocation_rows=5,
-        )
+        client.setup_charts()
+
         mock_spreadsheet.batch_update.assert_called_once()
         body = mock_spreadsheet.batch_update.call_args[0][0]
         requests = body["requests"]
-        # Should have 4 chart requests (portfolio vs bench, drawdown, rolling, allocation)
-        chart_requests = [r for r in requests if "addChart" in r]
-        assert len(chart_requests) == 4
+        add_chart_requests = [r for r in requests if "addChart" in r]
+        assert len(add_chart_requests) == 4
 
     def test_updates_existing_charts(
         self, client: SheetsClient, mock_spreadsheet: MagicMock
@@ -652,28 +684,26 @@ class TestCreateOrUpdateCharts:
             return ws
 
         mock_spreadsheet.worksheets.return_value = [
-            make_ws("Daily Values", 100),
-            make_ws("Rolling Returns", 200),
-            make_ws("Allocation", 300),
+            make_ws("Portfolio History", 600),
+            make_ws("Allocation", 700),
+            make_ws("Dashboard", 800),
         ]
-        # Existing charts with known titles
         mock_spreadsheet.fetch_sheet_metadata.return_value = {
             "sheets": [
                 {
-                    "properties": {"sheetId": 100},
+                    "properties": {"sheetId": 800},
                     "charts": [
-                        {"chartId": 1, "position": {}, "spec": {"title": "Portfolio vs Benchmark"}},
+                        {
+                            "chartId": 1,
+                            "position": {},
+                            "spec": {"title": "Portfolio Value vs Cost"},
+                        },
                         {"chartId": 2, "position": {}, "spec": {"title": "Drawdown"}},
+                        {"chartId": 3, "position": {}, "spec": {"title": "P&L Over Time"}},
                     ],
                 },
                 {
-                    "properties": {"sheetId": 200},
-                    "charts": [
-                        {"chartId": 3, "position": {}, "spec": {"title": "Rolling Returns"}},
-                    ],
-                },
-                {
-                    "properties": {"sheetId": 300},
+                    "properties": {"sheetId": 700},
                     "charts": [
                         {"chartId": 4, "position": {}, "spec": {"title": "Allocation"}},
                     ],
@@ -681,32 +711,33 @@ class TestCreateOrUpdateCharts:
             ]
         }
 
-        client.create_or_update_charts(
-            daily_values_rows=10,
-            rolling_returns_rows=10,
-            allocation_rows=5,
-        )
-        mock_spreadsheet.batch_update.assert_called_once()
+        client.setup_charts()
+
         body = mock_spreadsheet.batch_update.call_args[0][0]
         requests = body["requests"]
         update_requests = [r for r in requests if "updateChartSpec" in r]
         assert len(update_requests) == 4
 
 
-class TestCreateDateSlicer:
-    def test_creates_slicer(self, client: SheetsClient, mock_spreadsheet: MagicMock) -> None:
-        mock_ws = MagicMock()
-        mock_ws.title = "Daily Values"
-        mock_ws.id = 100
-        mock_spreadsheet.worksheets.return_value = [mock_ws]
-        # No existing slicers
-        mock_spreadsheet.fetch_sheet_metadata.return_value = {
-            "sheets": [{"properties": {"sheetId": 100}, "slicers": []}]
-        }
+class TestSetupAll:
+    @patch.object(SheetsClient, "setup_charts")
+    @patch.object(SheetsClient, "setup_dashboard_sheet")
+    @patch.object(SheetsClient, "setup_allocation_sheet")
+    @patch.object(SheetsClient, "setup_portfolio_history_sheet")
+    @patch.object(SheetsClient, "setup_prices_sheet")
+    def test_calls_all_setup_methods(
+        self,
+        mock_prices: MagicMock,
+        mock_history: MagicMock,
+        mock_alloc: MagicMock,
+        mock_dash: MagicMock,
+        mock_charts: MagicMock,
+        client: SheetsClient,
+    ) -> None:
+        client.setup_all()
 
-        client.create_date_slicer(num_rows=50)
-        mock_spreadsheet.batch_update.assert_called_once()
-        body = mock_spreadsheet.batch_update.call_args[0][0]
-        requests = body["requests"]
-        slicer_requests = [r for r in requests if "addSlicer" in r]
-        assert len(slicer_requests) == 1
+        mock_prices.assert_called_once()
+        mock_history.assert_called_once()
+        mock_alloc.assert_called_once()
+        mock_dash.assert_called_once()
+        mock_charts.assert_called_once()
