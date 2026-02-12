@@ -6,7 +6,7 @@ from datetime import date
 import gspread
 from gspread.utils import rowcol_to_a1
 
-from stocks_analysis.models import Holding, PortfolioSummary, Transaction
+from stocks_analysis.models import Holding, Transaction
 
 # Formatting colors (RGB dicts for gspread)
 HEADER_BG: dict[str, float] = {"red": 0.235, "green": 0.275, "blue": 0.349}  # #3C4659
@@ -122,16 +122,6 @@ class SheetsClient:
         _format_header_row(ws, len(headers))
         _apply_alternating_date_colors(ws, len(headers))
         return len(rows)
-
-    def upload_summary(self, summary: PortfolioSummary, date_str: str | None = None) -> None:
-        date_str = date_str or date.today().isoformat()
-        headers = ["date", *PortfolioSummary.csv_headers()]
-        ws = self._get_or_create_worksheet("Summary", headers)
-        self._delete_rows_for_date(ws, date_str)
-
-        ws.append_rows([[date_str, *summary.to_csv_row()]])
-        _format_header_row(ws, len(headers))
-        _apply_alternating_date_colors(ws, len(headers))
 
     def read_all_holdings_rows(self) -> list[list[str]]:
         """Read all rows from the Holdings worksheet, skipping the header."""

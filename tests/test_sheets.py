@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, call, patch
 import gspread
 import pytest
 
-from stocks_analysis.models import PortfolioSummary, Transaction
+from stocks_analysis.models import Transaction
 from stocks_analysis.sheets import (
     DATE_COLOR_A,
     DATE_COLOR_B,
@@ -210,54 +210,6 @@ class TestUploadHoldings:
         assert len(rows) == 2
         assert rows[0][1] == "RELIANCE"
         assert rows[1][1] == "TCS"
-
-
-class TestUploadSummary:
-    def test_uploads_summary_row(self, client: SheetsClient, mock_spreadsheet: MagicMock) -> None:
-        mock_ws = MagicMock()
-        mock_ws.row_values.return_value = ["date"] + PortfolioSummary.csv_headers()
-        mock_ws.col_values.return_value = ["date"]
-        mock_spreadsheet.worksheet.return_value = mock_ws
-
-        summary = PortfolioSummary.from_holdings([make_holding()])
-        client.upload_summary(summary, date_str="2024-01-15")
-
-        mock_ws.append_rows.assert_called_once()
-        rows = mock_ws.append_rows.call_args[0][0]
-        assert len(rows) == 1
-        assert rows[0][0] == "2024-01-15"
-
-    @patch("stocks_analysis.sheets._apply_alternating_date_colors")
-    @patch("stocks_analysis.sheets._format_header_row")
-    def test_applies_formatting_after_upload(
-        self,
-        mock_fmt_header: MagicMock,
-        mock_fmt_colors: MagicMock,
-        client: SheetsClient,
-        mock_spreadsheet: MagicMock,
-    ) -> None:
-        mock_ws = MagicMock()
-        mock_ws.row_values.return_value = ["date"] + PortfolioSummary.csv_headers()
-        mock_ws.col_values.return_value = ["date"]
-        mock_spreadsheet.worksheet.return_value = mock_ws
-
-        summary = PortfolioSummary.from_holdings([make_holding()])
-        client.upload_summary(summary, date_str="2024-01-15")
-        num_cols = 1 + len(PortfolioSummary.csv_headers())
-        mock_fmt_header.assert_called_once_with(mock_ws, num_cols)
-        mock_fmt_colors.assert_called_once_with(mock_ws, num_cols)
-
-    def test_dedup_deletes_existing_date_rows(
-        self, client: SheetsClient, mock_spreadsheet: MagicMock
-    ) -> None:
-        mock_ws = MagicMock()
-        mock_ws.row_values.return_value = ["date"] + PortfolioSummary.csv_headers()
-        mock_ws.col_values.return_value = ["date", "2024-01-15"]
-        mock_spreadsheet.worksheet.return_value = mock_ws
-
-        summary = PortfolioSummary.from_holdings([make_holding()])
-        client.upload_summary(summary, date_str="2024-01-15")
-        mock_ws.delete_rows.assert_called_once_with(2)
 
 
 class TestColLetter:

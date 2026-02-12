@@ -167,8 +167,6 @@ class TestUploadCsvToSheets:
         assert uploaded[0].instrument == "RELIANCE"
         assert uploaded[1].instrument == "TCS"
         assert mock_client.upload_holdings.call_args[1]["date_str"] == expected_date
-        mock_client.upload_summary.assert_called_once()
-        assert mock_client.upload_summary.call_args[1]["date_str"] == expected_date
 
     @patch("stocks_analysis.main.create_sheets_client")
     def test_raises_when_env_vars_missing(
@@ -313,21 +311,35 @@ class TestRunLoadsDotenv:
 
 
 class TestUploadToSheetsIfConfigured:
+    @patch("stocks_analysis.main.infer_transactions")
+    @patch("stocks_analysis.main.parse_snapshots_from_rows")
     @patch("stocks_analysis.main.create_sheets_client")
     @patch.dict("os.environ", {"GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json", "GOOGLE_SHEET_ID": "x"})
-    def test_uploads_when_configured(self, mock_create_client: MagicMock) -> None:
+    def test_uploads_holdings_and_transactions(
+        self,
+        mock_create_client: MagicMock,
+        mock_parse: MagicMock,
+        mock_infer: MagicMock,
+    ) -> None:
         from stocks_analysis.main import _upload_to_sheets_if_configured
 
         mock_client = MagicMock()
         mock_create_client.return_value = mock_client
         mock_client.upload_holdings.return_value = 1
+        mock_client.read_all_holdings_rows.return_value = [["row"]]
+        mock_parse.return_value = [MagicMock()]
+        mock_txns = [MagicMock()]
+        mock_infer.return_value = mock_txns
 
         holdings = [make_holding()]
         _upload_to_sheets_if_configured(holdings)
 
         mock_create_client.assert_called_once()
         mock_client.upload_holdings.assert_called_once_with(holdings)
-        mock_client.upload_summary.assert_called_once()
+        mock_client.read_all_holdings_rows.assert_called_once()
+        mock_parse.assert_called_once()
+        mock_infer.assert_called_once()
+        mock_client.upload_transactions.assert_called_once_with(mock_txns)
 
     @patch.dict("os.environ", {}, clear=True)
     def test_silently_skips_when_not_configured(self) -> None:

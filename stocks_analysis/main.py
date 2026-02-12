@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from stocks_analysis.analysis import infer_transactions, parse_snapshots_from_rows
 from stocks_analysis.kite import KiteFetcher
-from stocks_analysis.models import Holding, PortfolioSummary
+from stocks_analysis.models import Holding
 from stocks_analysis.sheets import create_sheets_client
 
 logger = logging.getLogger(__name__)
@@ -63,10 +63,14 @@ def _upload_to_sheets_if_configured(holdings: list[Holding]) -> None:
 
     try:
         client = create_sheets_client()
-        summary = PortfolioSummary.from_holdings(holdings)
         count = client.upload_holdings(holdings)
-        client.upload_summary(summary)
-        print(f"Uploaded {count} holdings and summary to Google Sheets.")
+        print(f"Uploaded {count} holdings to Google Sheets.")
+
+        rows = client.read_all_holdings_rows()
+        snapshots = parse_snapshots_from_rows(rows)
+        transactions = infer_transactions(snapshots)
+        client.upload_transactions(transactions)
+        print(f"Uploaded {len(transactions)} inferred transactions.")
     except Exception:
         logger.warning("Failed to upload to Google Sheets", exc_info=True)
 
@@ -88,10 +92,8 @@ def _upload_csv_to_sheets(filepath: Path) -> None:
     print(f"Loaded {len(holdings)} holdings from {filepath}")
     date_str = _extract_date_from_filename(filepath)
     client = create_sheets_client()
-    summary = PortfolioSummary.from_holdings(holdings)
     count = client.upload_holdings(holdings, date_str=date_str)
-    client.upload_summary(summary, date_str=date_str)
-    print(f"Uploaded {count} holdings and summary to Google Sheets.")
+    print(f"Uploaded {count} holdings to Google Sheets.")
 
     # Infer and upload transactions from all holdings snapshots
     rows = client.read_all_holdings_rows()
