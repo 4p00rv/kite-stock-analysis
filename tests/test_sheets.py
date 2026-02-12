@@ -605,13 +605,23 @@ class TestSetupAllocationSheet:
         client.setup_allocation_sheet()
 
         calls = mock_ws.update.call_args_list
-        # E1 = "latest_date", E2 has MAX formula
-        e1_calls = [c for c in calls if c.kwargs.get("range_name") == "E1"]
-        assert len(e1_calls) == 1
-        # A2 has SORT/FILTER formula
+        # H1 = "latest_date" (helper cells moved to col H)
+        h1_calls = [c for c in calls if c.kwargs.get("range_name") == "H1"]
+        assert len(h1_calls) == 1
+        # A2 has SORT/FILTER formula including cost
         a2_calls = [c for c in calls if c.kwargs.get("range_name") == "A2"]
         assert len(a2_calls) == 1
-        assert "SORT" in str(a2_calls[0][0][0])
+        a2_formula = str(a2_calls[0][0][0])
+        assert "SORT" in a2_formula
+        assert "Holdings!D2:D*Holdings!C2:C" in a2_formula  # cost column
+        # D2 has weight_pct ARRAYFORMULA
+        d2_calls = [c for c in calls if c.kwargs.get("range_name") == "D2"]
+        assert len(d2_calls) == 1
+        assert "ARRAYFORMULA" in str(d2_calls[0][0][0])
+        # F2 has return_pct ARRAYFORMULA
+        f2_calls = [c for c in calls if c.kwargs.get("range_name") == "F2"]
+        assert len(f2_calls) == 1
+        assert "ARRAYFORMULA" in str(f2_calls[0][0][0])
 
 
 class TestSetupDashboardSheet:
@@ -672,7 +682,7 @@ class TestSetupCharts:
         body = mock_spreadsheet.batch_update.call_args[0][0]
         requests = body["requests"]
         add_chart_requests = [r for r in requests if "addChart" in r]
-        assert len(add_chart_requests) == 4
+        assert len(add_chart_requests) == 5
 
     def test_updates_existing_charts(
         self, client: SheetsClient, mock_spreadsheet: MagicMock
@@ -706,6 +716,11 @@ class TestSetupCharts:
                     "properties": {"sheetId": 700},
                     "charts": [
                         {"chartId": 4, "position": {}, "spec": {"title": "Allocation"}},
+                        {
+                            "chartId": 5,
+                            "position": {},
+                            "spec": {"title": "Stock Performance"},
+                        },
                     ],
                 },
             ]
@@ -716,7 +731,7 @@ class TestSetupCharts:
         body = mock_spreadsheet.batch_update.call_args[0][0]
         requests = body["requests"]
         update_requests = [r for r in requests if "updateChartSpec" in r]
-        assert len(update_requests) == 4
+        assert len(update_requests) == 5
 
 
 class TestSetupAll:

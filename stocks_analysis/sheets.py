@@ -215,11 +215,12 @@ class SheetsClient:
             range_name="A2",
             raw=False,
         )
-        # B2: lookup formula
+        # B2: lookup formula (TEXT() on both sides to avoid date/text type mismatch)
         b2_formula = (
             '=IF(OR($A2="", B$1=""), "",'
-            " IFERROR(INDEX(FILTER("
-            "Holdings!E:E, Holdings!A:A=$A2, Holdings!B:B=B$1"
+            " IFERROR(INDEX(FILTER(Holdings!E:E,"
+            ' TEXT(Holdings!A:A,"YYYY-MM-DD")=TEXT($A2,"YYYY-MM-DD"),'
+            " Holdings!B:B=B$1"
             '), 1), ""))'
         )
         ws.update([[b2_formula]], range_name="B2", raw=False)
@@ -347,31 +348,48 @@ class SheetsClient:
         print("Portfolio History sheet configured.")
 
     def setup_allocation_sheet(self) -> None:
-        """Create Allocation sheet with latest-snapshot weight formulas."""
-        headers = ["instrument", "current_value", "weight_pct"]
+        """Create Allocation sheet with latest-snapshot weight and performance formulas."""
+        headers = ["instrument", "current_value", "cost", "weight_pct", "pnl", "return_pct"]
         ws = self._get_or_create_plain_worksheet("Allocation")
 
-        ws.update([headers], range_name="A1:C1")
+        ws.update([headers], range_name="A1:F1")
 
-        # Helper cells for latest date / total value
-        ws.update([["latest_date"]], range_name="E1")
-        ws.update([["=MAX(Holdings!A2:A)"]], range_name="E2", raw=False)
-        ws.update([["total_value"]], range_name="E3")
+        # Helper cells in column H (out of the way of data columns)
+        ws.update([["latest_date"]], range_name="H1")
+        ws.update([["=MAX(Holdings!A2:A)"]], range_name="H2", raw=False)
+        ws.update([["total_value"]], range_name="H3")
         ws.update(
-            [["=SUMPRODUCT((Holdings!A2:A=$E$2)*Holdings!F2:F)"]],
-            range_name="E4",
+            [["=SUMPRODUCT((Holdings!A2:A=$H$2)*Holdings!F2:F)"]],
+            range_name="H4",
             raw=False,
         )
 
-        # Sorted allocation
+        # A2:C2 spill — instrument, current_value, cost (sorted by value desc)
         ws.update(
-            [["=SORT(FILTER({Holdings!B2:B, Holdings!F2:F}, Holdings!A2:A=$E$2), 2, FALSE)"]],
+            [
+                [
+                    "=SORT(FILTER("
+                    "{Holdings!B2:B, Holdings!F2:F, Holdings!D2:D*Holdings!C2:C},"
+                    " Holdings!A2:A=$H$2), 2, FALSE)"
+                ]
+            ],
             range_name="A2",
             raw=False,
         )
+        # D2:F2 — weight_pct, pnl, return_pct (ARRAYFORMULA to auto-expand)
         ws.update(
-            [['=IF(A2="", "", B2/$E$4*100)']],
-            range_name="C2",
+            [['=ARRAYFORMULA(IF(A2:A="", "", B2:B/$H$4*100))']],
+            range_name="D2",
+            raw=False,
+        )
+        ws.update(
+            [['=ARRAYFORMULA(IF(A2:A="", "", B2:B-C2:C))']],
+            range_name="E2",
+            raw=False,
+        )
+        ws.update(
+            [['=ARRAYFORMULA(IF((A2:A="")+(C2:C=0), "", (B2:B-C2:C)/C2:C*100))']],
+            range_name="F2",
             raw=False,
         )
 
@@ -430,11 +448,11 @@ class SheetsClient:
             ],
             [_ph_filter("MAX", "H", "0")],
             [f'=IFERROR(INDEX(FILTER({ph}!A2:A, {ph}!H2:H=B11), 1), "")'],
-            ['=IFERROR(SUMPRODUCT(FILTER(Allocation!C2:C, Allocation!C2:C<>"")^2/10000), "")'],
+            ['=IFERROR(SUMPRODUCT(FILTER(Allocation!D2:D, Allocation!D2:D<>"")^2/10000), "")'],
             [
                 "=IFERROR(SUM(LARGE("
-                'FILTER(Allocation!C2:C, Allocation!C2:C<>""), {1,2,3,4,5})),'
-                ' IFERROR(SUM(FILTER(Allocation!C2:C, Allocation!C2:C<>"")), ""))'
+                'FILTER(Allocation!D2:D, Allocation!D2:D<>""), {1,2,3,4,5})),'
+                ' IFERROR(SUM(FILTER(Allocation!D2:D, Allocation!D2:D<>"")), ""))'
             ],
         ]
         ws.update(formulas[:14], range_name="B1:B14", raw=False)
@@ -459,6 +477,7 @@ class SheetsClient:
             self._drawdown_formula_spec(ph_id),
             self._pnl_over_time_spec(ph_id),
             self._allocation_formula_spec(al_id),
+            self._stock_performance_spec(al_id),
         ]
 
         for title, spec, anchor_sheet_id, anchor_col in chart_specs:
@@ -683,8 +702,8 @@ class SheetsClient:
                                 "sheetId": sheet_id,
                                 "startRowIndex": 0,
                                 "endRowIndex": 1000,
-                                "startColumnIndex": 2,
-                                "endColumnIndex": 3,
+                                "startColumnIndex": 3,  # D = weight_pct
+                                "endColumnIndex": 4,
                             }
                         ]
                     }
@@ -692,7 +711,55 @@ class SheetsClient:
                 "pieHole": 0.4,
             },
         }
-        return title, spec, sheet_id, 4
+        return title, spec, sheet_id, 7
+
+    @staticmethod
+    def _stock_performance_spec(sheet_id: int) -> tuple[str, dict, int, int]:
+        title = "Stock Performance"
+        spec = {
+            "title": title,
+            "basicChart": {
+                "chartType": "BAR",
+                "legendPosition": "NO_LEGEND",
+                "domains": [
+                    {
+                        "domain": {
+                            "sourceRange": {
+                                "sources": [
+                                    {
+                                        "sheetId": sheet_id,
+                                        "startRowIndex": 0,
+                                        "endRowIndex": 1000,
+                                        "startColumnIndex": 0,  # A = instrument
+                                        "endColumnIndex": 1,
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ],
+                "series": [
+                    {
+                        "series": {
+                            "sourceRange": {
+                                "sources": [
+                                    {
+                                        "sheetId": sheet_id,
+                                        "startRowIndex": 0,
+                                        "endRowIndex": 1000,
+                                        "startColumnIndex": 5,  # F = return_pct
+                                        "endColumnIndex": 6,
+                                    }
+                                ]
+                            }
+                        },
+                        "targetAxis": "BOTTOM_AXIS",
+                    }
+                ],
+                "headerCount": 1,
+            },
+        }
+        return title, spec, sheet_id, 7
 
     def setup_all(self) -> None:
         """Run all setup methods to create formula-based sheets and charts."""
