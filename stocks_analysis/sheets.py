@@ -190,16 +190,21 @@ class SheetsClient:
 
     def setup_prices_sheet(self) -> None:
         """Create Prices sheet with pivot formulas (date x instrument → LTP)."""
-        ws = self._get_or_create_plain_worksheet("Prices", rows=1000, cols=104)
+        # Delete and recreate to ensure clean slate (copyPaste fails on stale sheets)
+        try:
+            old_ws = self._spreadsheet.worksheet("Prices")
+            self._spreadsheet.del_worksheet(old_ws)
+        except gspread.WorksheetNotFound:
+            pass
+        ws = self._spreadsheet.add_worksheet(title="Prices", rows=1000, cols=104)
         sheet_id = ws.id
 
         # Header row and date column
         ws.update([["date"]], range_name="A1")
-        ws.update(
-            [['=TRANSPOSE(SORT(UNIQUE(FILTER(Holdings!B2:B, Holdings!B2:B<>""))))']],
-            range_name="B1",
-            raw=False,
-        )
+        # Latest date via text sort (YYYY-MM-DD sorts lexicographically)
+        latest_date = 'INDEX(SORT(UNIQUE(FILTER(Holdings!A2:A, Holdings!A2:A<>"")), 1, FALSE), 1)'
+        b1_formula = f"=TRANSPOSE(SORT(UNIQUE(FILTER(Holdings!B2:B, Holdings!A2:A={latest_date}))))"
+        ws.update([[b1_formula]], range_name="B1", raw=False)
         ws.update(
             [['=SORT(UNIQUE(FILTER(Holdings!A2:A, Holdings!A2:A<>"")))']],
             range_name="A2",
@@ -208,9 +213,9 @@ class SheetsClient:
         # B2: lookup formula (TEXT() on both sides to avoid date/text type mismatch)
         b2_formula = (
             '=IF(OR($A2="", B$1=""), "",'
-            " IFERROR(INDEX(FILTER(Holdings!E:E,"
-            ' TEXT(Holdings!A:A,"YYYY-MM-DD")=TEXT($A2,"YYYY-MM-DD"),'
-            " Holdings!B:B=B$1"
+            " IFERROR(INDEX(FILTER(Holdings!$E:$E,"
+            ' TEXT(Holdings!$A:$A,"YYYY-MM-DD")=TEXT($A2,"YYYY-MM-DD"),'
+            " Holdings!$B:$B=B$1"
             '), 1), ""))'
         )
         ws.update([[b2_formula]], range_name="B2", raw=False)

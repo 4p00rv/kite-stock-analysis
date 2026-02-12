@@ -497,18 +497,25 @@ class TestSetupPricesSheet:
         calls = mock_ws.update.call_args_list
         # A1 = "date"
         assert any(c.kwargs.get("range_name") == "A1" and c[0][0] == [["date"]] for c in calls)
-        # B1 has TRANSPOSE formula
+        # B1 has TRANSPOSE formula filtering to latest date only
         b1_calls = [c for c in calls if c.kwargs.get("range_name") == "B1"]
         assert len(b1_calls) == 1
         assert "TRANSPOSE" in str(b1_calls[0][0][0])
+        # Uses text-sorted latest date (not MAX, which fails on text dates)
+        assert "SORT" in str(b1_calls[0][0][0])
+        assert "INDEX" in str(b1_calls[0][0][0])
         # A2 has SORT/UNIQUE formula
         a2_calls = [c for c in calls if c.kwargs.get("range_name") == "A2"]
         assert len(a2_calls) == 1
         assert "SORT" in str(a2_calls[0][0][0])
-        # B2 has INDEX/FILTER formula
+        # B2 has INDEX/FILTER formula with absolute Holdings column refs
         b2_calls = [c for c in calls if c.kwargs.get("range_name") == "B2"]
         assert len(b2_calls) == 1
-        assert "IFERROR" in str(b2_calls[0][0][0])
+        b2_str = str(b2_calls[0][0][0])
+        assert "IFERROR" in b2_str
+        assert "Holdings!$E:$E" in b2_str
+        assert "Holdings!$A:$A" in b2_str
+        assert "Holdings!$B:$B" in b2_str
 
         # Should use batchUpdate for copyPaste fill
         mock_spreadsheet.batch_update.assert_called_once()
@@ -516,6 +523,20 @@ class TestSetupPricesSheet:
         requests = body["requests"]
         copy_requests = [r for r in requests if "copyPaste" in r]
         assert len(copy_requests) == 2  # fill right + fill down
+
+    def test_deletes_existing_sheet_before_recreating(
+        self, client: SheetsClient, mock_spreadsheet: MagicMock
+    ) -> None:
+        old_ws = MagicMock()
+        new_ws = MagicMock()
+        new_ws.id = 501
+        mock_spreadsheet.worksheet.return_value = old_ws
+        mock_spreadsheet.add_worksheet.return_value = new_ws
+
+        client.setup_prices_sheet()
+
+        mock_spreadsheet.del_worksheet.assert_called_once_with(old_ws)
+        mock_spreadsheet.add_worksheet.assert_called_once_with(title="Prices", rows=1000, cols=104)
 
 
 class TestSetupPortfolioHistorySheet:
