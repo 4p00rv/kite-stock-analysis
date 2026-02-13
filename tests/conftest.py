@@ -1,4 +1,10 @@
+from unittest.mock import MagicMock
+
+import gspread
+import pytest
+
 from stocks_analysis.models import Holding
+from stocks_analysis.sheets import SheetsClient
 
 
 def make_holding(**overrides: object) -> Holding:
@@ -16,3 +22,13 @@ def make_holding(**overrides: object) -> Holding:
     }
     defaults.update(overrides)
     return Holding(**defaults)
+
+
+@pytest.fixture
+def mock_spreadsheet() -> MagicMock:
+    return MagicMock(spec=gspread.Spreadsheet)
+
+
+@pytest.fixture
+def client(mock_spreadsheet: MagicMock) -> SheetsClient:
+    return SheetsClient(mock_spreadsheet)
