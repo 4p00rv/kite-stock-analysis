@@ -91,6 +91,7 @@ class TestLoadHoldingsFromCsv:
         assert loaded == []
 
 
+@patch.dict("os.environ", {"GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json", "GOOGLE_SHEET_ID": "x"})
 class TestScrape:
     @patch("stocks_analysis.main._upload_to_sheets_if_configured")
     @patch("stocks_analysis.main.create_kite_fetcher")
@@ -248,6 +249,30 @@ class TestRunWithSubcommands:
         mock_scrape.assert_called_once()
 
 
+class TestScrapeFailsWithoutSheetsConfig:
+    @patch.dict("os.environ", {}, clear=True)
+    def test_raises_when_both_env_vars_missing(self) -> None:
+        import pytest
+
+        with pytest.raises(SystemExit, match="GOOGLE_SHEETS_CREDENTIALS"):
+            _scrape()
+
+    @patch.dict("os.environ", {"GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json"}, clear=True)
+    def test_raises_when_sheet_id_missing(self) -> None:
+        import pytest
+
+        with pytest.raises(SystemExit, match="GOOGLE_SHEET_ID"):
+            _scrape()
+
+    @patch.dict("os.environ", {"GOOGLE_SHEET_ID": "abc"}, clear=True)
+    def test_raises_when_credentials_missing(self) -> None:
+        import pytest
+
+        with pytest.raises(SystemExit, match="GOOGLE_SHEETS_CREDENTIALS"):
+            _scrape()
+
+
+@patch.dict("os.environ", {"GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json", "GOOGLE_SHEET_ID": "x"})
 class TestScrapeAutoFill:
     @patch("stocks_analysis.main._upload_to_sheets_if_configured")
     @patch("stocks_analysis.main.create_kite_fetcher")
@@ -269,7 +294,11 @@ class TestScrapeAutoFill:
     @patch("stocks_analysis.main._upload_to_sheets_if_configured")
     @patch("stocks_analysis.main.create_kite_fetcher")
     @patch("stocks_analysis.main.save_holdings_to_csv")
-    @patch.dict("os.environ", {}, clear=True)
+    @patch.dict(
+        "os.environ",
+        {"GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json", "GOOGLE_SHEET_ID": "x"},
+        clear=True,
+    )
     def test_skips_fill_when_env_vars_missing(
         self, mock_save: MagicMock, mock_create: MagicMock, mock_upload: MagicMock, tmp_path: Path
     ) -> None:
@@ -286,7 +315,15 @@ class TestScrapeAutoFill:
     @patch("stocks_analysis.main._upload_to_sheets_if_configured")
     @patch("stocks_analysis.main.create_kite_fetcher")
     @patch("stocks_analysis.main.save_holdings_to_csv")
-    @patch.dict("os.environ", {"KITE_USER_ID": "AB1234"}, clear=True)
+    @patch.dict(
+        "os.environ",
+        {
+            "KITE_USER_ID": "AB1234",
+            "GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json",
+            "GOOGLE_SHEET_ID": "x",
+        },
+        clear=True,
+    )
     def test_skips_fill_when_only_user_id_set(
         self, mock_save: MagicMock, mock_create: MagicMock, mock_upload: MagicMock, tmp_path: Path
     ) -> None:
@@ -342,7 +379,7 @@ class TestUploadToSheetsIfConfigured:
         mock_client.upload_transactions.assert_called_once_with(mock_txns)
 
     @patch.dict("os.environ", {}, clear=True)
-    def test_silently_skips_when_not_configured(self) -> None:
+    def test_skips_when_not_configured(self) -> None:
         from stocks_analysis.main import _upload_to_sheets_if_configured
 
         # Should not raise
@@ -359,6 +396,7 @@ class TestUploadToSheetsIfConfigured:
             _upload_to_sheets_if_configured([make_holding()])
             mock_logger.warning.assert_called_once()
 
+    @patch.dict("os.environ", {"GOOGLE_SHEETS_CREDENTIALS": "/tmp/c.json", "GOOGLE_SHEET_ID": "x"})
     @patch("stocks_analysis.main._upload_to_sheets_if_configured")
     @patch("stocks_analysis.main.create_kite_fetcher")
     @patch("stocks_analysis.main.save_holdings_to_csv")

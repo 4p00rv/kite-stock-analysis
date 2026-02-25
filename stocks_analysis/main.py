@@ -103,8 +103,21 @@ def _upload_csv_to_sheets(filepath: Path) -> None:
     print(f"Uploaded {len(transactions)} inferred transactions.")
 
 
+def _check_sheets_env() -> None:
+    """Raise SystemExit if Google Sheets env vars are missing."""
+    missing = [
+        var for var in ("GOOGLE_SHEETS_CREDENTIALS", "GOOGLE_SHEET_ID") if not os.environ.get(var)
+    ]
+    if missing:
+        raise SystemExit(
+            f"Required environment variables not set: {', '.join(missing)}. "
+            "Set them in your .env file or environment."
+        )
+
+
 def _scrape() -> None:
-    """Kite login → scrape → CSV → optional sheets upload."""
+    """Kite login → scrape → CSV → sheets upload."""
+    _check_sheets_env()
     with create_kite_fetcher() as fetcher:
         print("Opening Kite login page...")
         fetcher.open_login_page()
