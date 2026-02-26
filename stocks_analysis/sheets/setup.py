@@ -20,6 +20,18 @@ def _get_or_create_plain_worksheet(
         return client._spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
 
 
+def setup_capital_flows_sheet(client: SheetsClient) -> None:
+    """Create Capital Flows sheet with headers for manual deposit/withdrawal tracking."""
+    ws = _get_or_create_plain_worksheet(client, "Capital Flows")
+    headers = ["date", "type", "amount", "notes"]
+    existing = ws.row_values(1)
+    if existing != headers:
+        ws.update([headers], range_name="A1:D1")
+    _format_header_row(ws, len(headers))
+    ws.freeze(rows=1)
+    print("Capital Flows sheet configured.")
+
+
 def setup_prices_sheet(client: SheetsClient) -> None:
     """Create Prices sheet with pivot formulas (date x instrument -> LTP)."""
     # Delete and recreate to ensure clean slate (copyPaste fails on stale sheets)
@@ -245,8 +257,11 @@ def setup_dashboard_sheet(client: SheetsClient) -> None:
         ["Max Drawdown Date"],
         ["HHI"],
         ["Top 5 Concentration %"],
+        ["Capital Deployed"],
+        ["True P&L"],
+        ["True Return %"],
     ]
-    ws.update(labels[:14], range_name="A1:A14")
+    ws.update(labels[:17], range_name="A1:A17")
 
     ph = "'Portfolio History'"
 
@@ -284,8 +299,14 @@ def setup_dashboard_sheet(client: SheetsClient) -> None:
             'FILTER(Allocation!D2:D, Allocation!D2:D<>""), {1,2,3,4,5})),'
             ' IFERROR(SUM(FILTER(Allocation!D2:D, Allocation!D2:D<>"")), ""))'
         ],
+        [
+            "=SUMPRODUCT(('Capital Flows'!B2:B=\"DEPOSIT\")*'Capital Flows'!C2:C)"
+            " - SUMPRODUCT(('Capital Flows'!B2:B=\"WITHDRAWAL\")*'Capital Flows'!C2:C)"
+        ],
+        ['=IF(B2="", "", B2-B15)'],
+        ['=IFERROR(B16/B15*100, "")'],
     ]
-    ws.update(formulas[:14], range_name="B1:B14", raw=False)
+    ws.update(formulas[:17], range_name="B1:B17", raw=False)
 
     _format_header_row(ws, 2)
     ws.freeze(rows=1)
@@ -299,6 +320,7 @@ def setup_all(client: SheetsClient) -> None:
     setup_prices_sheet(client)
     setup_portfolio_history_sheet(client)
     setup_allocation_sheet(client)
+    setup_capital_flows_sheet(client)
     setup_dashboard_sheet(client)
     setup_charts(client)
     print("All formula sheets and charts configured.")

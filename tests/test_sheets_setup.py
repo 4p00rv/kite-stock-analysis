@@ -122,6 +122,37 @@ class TestSetupAllocationSheet:
         assert "ARRAYFORMULA" in str(f2_calls[0][0][0])
 
 
+class TestSetupCapitalFlowsSheet:
+    def test_creates_capital_flows_with_headers(
+        self, client: SheetsClient, mock_spreadsheet: MagicMock
+    ) -> None:
+        mock_ws = MagicMock()
+        mock_ws.row_values.return_value = []
+        mock_ws.id = 850
+        mock_spreadsheet.worksheet.side_effect = gspread.WorksheetNotFound("Capital Flows")
+        mock_spreadsheet.add_worksheet.return_value = mock_ws
+
+        client.setup_capital_flows_sheet()
+
+        calls = mock_ws.update.call_args_list
+        # Should write headers: date, type, amount, notes
+        header_calls = [c for c in calls if c.kwargs.get("range_name") == "A1:D1"]
+        assert len(header_calls) == 1
+        headers = header_calls[0][0][0]
+        assert headers == [["date", "type", "amount", "notes"]]
+
+    def test_reuses_existing_worksheet(
+        self, client: SheetsClient, mock_spreadsheet: MagicMock
+    ) -> None:
+        mock_ws = MagicMock()
+        mock_ws.row_values.return_value = ["date", "type", "amount", "notes"]
+        mock_spreadsheet.worksheet.return_value = mock_ws
+
+        client.setup_capital_flows_sheet()
+
+        mock_spreadsheet.add_worksheet.assert_not_called()
+
+
 class TestSetupDashboardSheet:
     def test_creates_dashboard_with_labels_and_formulas(
         self, client: SheetsClient, mock_spreadsheet: MagicMock
@@ -136,26 +167,58 @@ class TestSetupDashboardSheet:
 
         calls = mock_ws.update.call_args_list
         # Should write labels and formulas
-        # Check A1:A14 contains labels
-        a_col_calls = [c for c in calls if c.kwargs.get("range_name") == "A1:A14"]
+        # Check A1:A17 contains labels (14 original + 3 new capital metrics)
+        a_col_calls = [c for c in calls if c.kwargs.get("range_name") == "A1:A17"]
         assert len(a_col_calls) == 1
         labels = a_col_calls[0][0][0]
         assert labels[0] == ["Metric"]
         assert labels[1] == ["Portfolio Value"]
         assert labels[8] == ["Days Invested"]
         assert labels[9] == ["XIRR"]
+        assert labels[14] == ["Capital Deployed"]
+        assert labels[15] == ["True P&L"]
+        assert labels[16] == ["True Return %"]
 
-        # Check B1:B14 has formulas
-        b_col_calls = [c for c in calls if c.kwargs.get("range_name") == "B1:B14"]
+        # Check B1:B17 has formulas
+        b_col_calls = [c for c in calls if c.kwargs.get("range_name") == "B1:B17"]
         assert len(b_col_calls) == 1
         formulas = b_col_calls[0][0][0]
         assert formulas[0] == ["Value"]
         assert "IFERROR" in str(formulas[1][0])  # Portfolio Value formula
 
+    def test_capital_deployed_formula_references_capital_flows(
+        self, client: SheetsClient, mock_spreadsheet: MagicMock
+    ) -> None:
+        mock_ws = MagicMock()
+        mock_ws.row_values.return_value = []
+        mock_ws.id = 800
+        mock_spreadsheet.worksheet.side_effect = gspread.WorksheetNotFound("Dashboard")
+        mock_spreadsheet.add_worksheet.return_value = mock_ws
+
+        client.setup_dashboard_sheet()
+
+        calls = mock_ws.update.call_args_list
+        b_col_calls = [c for c in calls if c.kwargs.get("range_name") == "B1:B17"]
+        formulas = b_col_calls[0][0][0]
+        # Capital Deployed (row 15, index 14) uses SUMPRODUCT on Capital Flows
+        capital_deployed = str(formulas[14][0])
+        assert "Capital Flows" in capital_deployed
+        assert "DEPOSIT" in capital_deployed
+        assert "WITHDRAWAL" in capital_deployed
+        # True P&L (row 16, index 15) references B2 and B15
+        true_pnl = str(formulas[15][0])
+        assert "B2" in true_pnl
+        assert "B15" in true_pnl
+        # True Return % (row 17, index 16) references B16 and B15
+        true_return = str(formulas[16][0])
+        assert "B16" in true_return
+        assert "B15" in true_return
+
 
 class TestSetupAll:
     @patch.object(SheetsClient, "setup_charts")
     @patch.object(SheetsClient, "setup_dashboard_sheet")
+    @patch.object(SheetsClient, "setup_capital_flows_sheet")
     @patch.object(SheetsClient, "setup_allocation_sheet")
     @patch.object(SheetsClient, "setup_portfolio_history_sheet")
     @patch.object(SheetsClient, "setup_prices_sheet")
@@ -164,6 +227,7 @@ class TestSetupAll:
         mock_prices: MagicMock,
         mock_history: MagicMock,
         mock_alloc: MagicMock,
+        mock_capital_flows: MagicMock,
         mock_dash: MagicMock,
         mock_charts: MagicMock,
         client: SheetsClient,
@@ -173,5 +237,6 @@ class TestSetupAll:
         mock_prices.assert_called_once()
         mock_history.assert_called_once()
         mock_alloc.assert_called_once()
+        mock_capital_flows.assert_called_once()
         mock_dash.assert_called_once()
         mock_charts.assert_called_once()

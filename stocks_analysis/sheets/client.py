@@ -126,6 +126,12 @@ class SheetsClient:
 
         setup_allocation_sheet(self)
 
+    def setup_capital_flows_sheet(self) -> None:
+        """Create Capital Flows sheet for manual deposit/withdrawal tracking."""
+        from stocks_analysis.sheets.setup import setup_capital_flows_sheet
+
+        setup_capital_flows_sheet(self)
+
     def setup_dashboard_sheet(self) -> None:
         """Create Dashboard sheet with key metrics formulas."""
         from stocks_analysis.sheets.setup import setup_dashboard_sheet
@@ -143,6 +149,7 @@ class SheetsClient:
         self.setup_prices_sheet()
         self.setup_portfolio_history_sheet()
         self.setup_allocation_sheet()
+        self.setup_capital_flows_sheet()
         self.setup_dashboard_sheet()
         self.setup_charts()
         print("All formula sheets and charts configured.")
